@@ -186,6 +186,7 @@ class Vomic extends ComicSource {
                 type: "fixed",
                 categories: Vomic.categories.map(c => c[1]),
                 categoryParams: Vomic.categories.map(c => `${c[0]}`),
+                itemType: "category",
             },
         ],
     }

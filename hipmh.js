@@ -180,6 +180,7 @@ class Hipmh extends ComicSource {
                 type: "fixed",
                 categories: ["全部", "连载中", "已完结"],
                 categoryParams: ["all", "ongoing", "completed"],
+                itemType: "category",
             },
         ],
     }
