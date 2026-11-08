@@ -2,7 +2,7 @@ class MXS extends ComicSource {
     // 漫画源基本信息
     name = "漫小肆";
     key = "mxs";
-    version = "1.0.0";
+    version = "1.1.0";
     minAppVersion = "1.5.0";
     url = "https://cdn.jsdelivr.net/gh/venera-app/venera-configs@main/mxs.js";
 
@@ -13,15 +13,15 @@ class MXS extends ComicSource {
             title: "选择域名",
             type: "select",
             options: [
+                { value: "https://www.jjmh.cc", text: "jjmh.cc" },
+                { value: "https://www.wzd1.cc", text: "wzd1.cc" },
                 { value: "https://www.mxshm.top", text: "mxshm.top" },
                 { value: "https://www.jjmhw1.top", text: "jjmhw1.top" },
                 { value: "https://www.jjmh.top", text: "jjmh.top" },
-                { value: "https://www.jjmh.cc", text: "jjmh.cc" },
-                { value: "https://www.wzd1.cc", text: "wzd1.cc" },
                 { value: "https://www.wzdhm1.cc", text: "wzdhm1.cc" },
                 { value: "https://www.ikanwzd.cc", text: "ikanwzd.cc" }
             ],
-            default: "https://www.mxshm.top"
+            default: "https://www.jjmh.cc"
         },
         
         // 域名检测功能
@@ -71,6 +71,21 @@ class MXS extends ComicSource {
         return this.loadSetting("domains");
     }
 
+    // 当前实测可用的域名（探测成功后记录，避免每次都从坏域名开始）
+    get workingBase() {
+        return this.loadData("_base") || this.baseUrl;
+    }
+
+    // 所有候选域名：当前设置优先，其余按顺序作为备份
+    get candidates() {
+        const list = [this.baseUrl];
+        const opts = this.settings.domains.options;
+        for (const o of opts) {
+            if (list.indexOf(o.value) < 0) list.push(o.value);
+        }
+        return list;
+    }
+
     // 解析普通漫画列表
     parseComicList(items) {
         const comics = [];
@@ -93,7 +108,7 @@ class MXS extends ComicSource {
                     id: id,
                     title: title,
                     subTitle: author,
-                    cover: `${this.baseUrl}/static/upload/book/${id}/cover.jpg`,
+                    cover: `${this.workingBase}/static/upload/book/${id}/cover.jpg`,
                     description: description
                 }));
             }
@@ -129,7 +144,7 @@ class MXS extends ComicSource {
                     id: id,
                     title: title,
                     subTitle: author,
-                    cover: `${this.baseUrl}/static/upload/book/${id}/cover.jpg`,
+                    cover: `${this.workingBase}/static/upload/book/${id}/cover.jpg`,
                     tags: tags,
                     description: `热度: 🔥${clickCount}`
                 }));
@@ -154,7 +169,7 @@ class MXS extends ComicSource {
             if (userName && content) {
                 comments.push(new Comment({
                     userName: userName,
-                    avatar: `${this.baseUrl}${avatar}`,
+                    avatar: `${this.workingBase}${avatar}`,
                     content: content,
                     time: time
                 }));
@@ -165,16 +180,37 @@ class MXS extends ComicSource {
     }
 
     // 执行网络请求并返回HTML文档对象
+    // 某个域名不通时自动切换到其它候选域名，并把可用的那个记下来
     async fetchDocument(url) {
-        const res = await Network.get(url, {
+        const headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        });
-        
-        if (res.status !== 200) {
-            throw `请求失败: ${res.status}`;
+        };
+        const working = this.workingBase;
+        if (url.indexOf(working) !== 0) {
+            const res = await Network.get(url, headers);
+            if (res.status !== 200) {
+                throw `请求失败: ${res.status}`;
+            }
+            return new HtmlDocument(res.body);
         }
-        
-        return new HtmlDocument(res.body);
+        const tail = url.slice(working.length);
+        let lastError = null;
+        for (const domain of this.candidates) {
+            try {
+                const res = await Network.get(`${domain}${tail}`, headers);
+                if (res.status === 200 && typeof res.body === "string" && res.body.length > 0) {
+                    if (domain !== working) {
+                        this.saveData("_base", domain);
+                        console.log(`[mxs] 域名切换到 ${domain}`);
+                    }
+                    return new HtmlDocument(res.body);
+                }
+                lastError = `HTTP ${res.status}`;
+            } catch (e) {
+                lastError = String(e && e.message ? e.message : e);
+            }
+        }
+        throw `所有域名均不可用: ${lastError}`;
     }
 
     // === 探索页面配置 ===
@@ -183,7 +219,7 @@ class MXS extends ComicSource {
             title: "漫小肆",
             type: "multiPartPage",
             load: async (page) => {
-                const doc = await this.fetchDocument(this.baseUrl);
+                const doc = await this.fetchDocument(this.workingBase);
 
                 // 最近更新部分
                 const updateSection = {
@@ -252,14 +288,14 @@ class MXS extends ComicSource {
             // 根据分类构建不同的请求URL
             let url;
             if (category === "最近更新") {
-                url = `${this.baseUrl}/update?page=${page}`;
+                url = `${this.workingBase}/update?page=${page}`;
             } else if (category === "排行榜") {
-                url = `${this.baseUrl}/rank`;
+                url = `${this.workingBase}/rank`;
             } else {
                 const tag = (category !== "全部漫画") ? category : "全部";
                 const area = options[0] || "-1";
                 const end = options[1] || "-1";
-                url = `${this.baseUrl}/booklist?tag=${encodeURIComponent(tag)}&area=${area}&end=${end}&page=${page}`;
+                url = `${this.workingBase}/booklist?tag=${encodeURIComponent(tag)}&area=${area}&end=${end}&page=${page}`;
             }
 
             const doc = await this.fetchDocument(url);
@@ -361,7 +397,7 @@ class MXS extends ComicSource {
     search = {
         // 搜索漫画
         load: async (keyword, options, page) => {
-            const url = `${this.baseUrl}/search?keyword=${encodeURIComponent(keyword)}`;
+            const url = `${this.workingBase}/search?keyword=${encodeURIComponent(keyword)}`;
             const doc = await this.fetchDocument(url);
             const comics = this.parseComicList(doc.querySelectorAll(".mh-item"));
             
@@ -378,7 +414,7 @@ class MXS extends ComicSource {
     comic = {
         // 加载漫画详情
         loadInfo: async (id) => {
-            const url = `${this.baseUrl}/book/${id}`;
+            const url = `${this.workingBase}/book/${id}`;
             const doc = await this.fetchDocument(url);
 
             // 提取标题信息
@@ -440,7 +476,7 @@ class MXS extends ComicSource {
             return new ComicDetails({
                 title: title,
                 subTitle: subTitle,
-                cover: `${this.baseUrl}/static/upload/book/${id}/cover.jpg`,
+                cover: `${this.workingBase}/static/upload/book/${id}/cover.jpg`,
                 description: description,
                 tags: {
                     "作者": authors,
@@ -460,7 +496,7 @@ class MXS extends ComicSource {
 
         // 加载章节图片
         loadEp: async (comicId, epId) => {
-            const url = `${this.baseUrl}/chapter/${epId}`;
+            const url = `${this.workingBase}/chapter/${epId}`;
             const doc = await this.fetchDocument(url);
 
             // 提取懒加载图片
@@ -468,7 +504,7 @@ class MXS extends ComicSource {
             const imageElems = doc.querySelectorAll("img.lazy");
             for (let img of imageElems) {
                 const src = img.attributes?.["data-original"];
-                const image = src.replace(/https?:\/\/[^\/]+/, this.baseUrl);
+                const image = src.replace(/https?:\/\/[^\/]+/, this.workingBase);
                 if (image) images.push(image);
             }
 
@@ -485,7 +521,7 @@ class MXS extends ComicSource {
 
         // 加载评论列表
         loadComments: async (comicId, subId, page, replyTo) => {
-            const url = `${this.baseUrl}/book/${comicId}`;
+            const url = `${this.workingBase}/book/${comicId}`;
             const doc = await this.fetchDocument(url);
 
             const comments = this.parseCommentList(doc.querySelectorAll(".view-comment-main .postlist li.dashed"));

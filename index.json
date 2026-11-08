@@ -3,50 +3,21 @@
         "name": "拷贝漫画",
         "fileName": "copy_manga.js",
         "key": "copy_manga",
-        "version": "1.4.3"
+        "version": "1.5.0",
+        "description": "自动从可用 API 域名池中挑选最快域名"
     },
     {
         "name": "拷贝漫画(多账号)",
         "fileName": "copy_manga_multi_accounts.js",
         "key": "copy_manga_multi_accounts",
-        "version": "1.4.1"
-    },
-    {
-        "name": "Komiic",
-        "fileName": "komiic.js",
-        "key": "Komiic",
-        "version": "1.0.3"
+        "version": "1.5.0"
     },
     {
         "name": "包子漫画",
         "fileName": "baozi.js",
         "key": "baozi",
-        "version": "1.1.6"
-    },
-    {
-        "name": "Picacg",
-        "fileName": "picacg.js",
-        "key": "picacg",
-        "version": "1.0.6"
-    },
-    {
-        "name": "nhentai",
-        "fileName": "nhentai.js",
-        "key": "nhentai",
-        "version": "1.1.0"
-    },
-    {
-        "name": "紳士漫畫",
-        "fileName": "wnacg.js",
-        "key": "wnacg",
-        "version": "1.0.6",
-        "description": "紳士漫畫漫畫源, 不能使用時請嘗試更換URL"
-    },
-    {
-        "name": "ehentai",
-        "fileName": "ehentai.js",
-        "key": "ehentai",
-        "version": "1.1.8"
+        "version": "1.1.7",
+        "description": "默认使用 cn.webmota.com 线路"
     },
     {
         "name": "禁漫天堂",
@@ -61,24 +32,6 @@
         "key": "manga_dex",
         "version": "1.2.0",
         "description": "Forum login and comments are supported."
-    },
-    {
-        "name": "爱看漫",
-        "fileName": "ikmmh.js",
-        "key": "ikmmh",
-        "version": "1.0.6"
-    },
-    {
-        "name": "少年ジャンプ＋",
-        "fileName": "shonen_jump_plus.js",
-        "key": "shonen_jump_plus",
-        "version": "1.1.1"
-    },
-    {
-        "name": "hitomi.la",
-        "fileName": "hitomi.js",
-        "key": "hitomi",
-        "version": "1.1.2"
     },
     {
         "name": "comick",
@@ -99,39 +52,22 @@
         "version": "1.0.2"
     },
     {
-        "name": "漫画柜",
-        "fileName": "manhuagui.js",
-        "key": "ManHuaGui",
-        "version": "1.2.1"
-    },
-    {
-        "name": "漫蛙吧",
-        "fileName": "manwaba.js",
-        "key": "manwaba",
-        "version": "1.0.2"
+        "name": "漫蛙漫画",
+        "fileName": "manwa.js",
+        "key": "manwa",
+        "version": "1.0.0",
+        "description": "直连可用；图片由源自动解密"
     },
     {
         "name": "Lanraragi",
         "fileName": "lanraragi.js",
         "key": "lanraragi",
-        "version": "1.1.0"
+        "version": "1.2.0"
     },
     {
         "name": "Komga",
         "fileName": "komga.js",
         "key": "komga",
-        "version": "1.0.0"
-    },
-    {
-        "name": "カドコミ",
-        "fileName": "comic_walker.js",
-        "key": "comic_walker",
-        "version": "1.0.1"
-    },
-    {
-        "name": "漫画1234",
-        "fileName": "mh1234.js",
-        "key": "mh1234",
         "version": "1.0.0"
     },
     {
@@ -147,41 +83,18 @@
         "version": "1.2.1"
     },
     {
-        "name": "18漫画",
-        "fileName": "mh18.js",
-        "key": "mh18",
-        "version": "1.0.0"
-    },
-    {
         "name": "漫小肆",
         "fileName": "mxs.js",
         "key": "mxs",
-        "version": "1.0.0"
-    },
-    {
-        "name": "漫画人",
-        "fileName": "manhuaren.js",
-        "key": "manhuaren",
-        "version": "1.0.0"
-    },
-    {
-        "name": "H-Comic",
-        "fileName": "hcomic.js",
-        "key": "hcomic",
-        "version": "1.0.0"
-    },
-    {
-        "name": "jcomic.net",
-        "fileName": "jcomic.js",
-        "key": "jcomic",
-        "version": "1.0.0"
+        "version": "1.1.0"
     },
     {
         "name": "热辣漫画",
         "fileName": "hot_manga.js",
         "key": "hot_manga",
-        "version": "1.0.0"
-	},
+        "version": "1.1.0",
+        "description": "自动从可用 API 域名池中挑选最快域名"
+    },
     {
         "name": "Kavita",
         "fileName": "kavita.js",
@@ -189,11 +102,11 @@
         "version": "1.0.0"
     },
     {
-        "name": "嗨皮漫画",
-        "fileName": "happy.js",
-        "key": "happy",
+        "name": "嬉皮漫画",
+        "fileName": "hipmh.js",
+        "key": "hipmh",
         "version": "1.0.0",
-        "description": "中国大陆及日韩IP无法访问，遇到403可以尝试切换其他地区网络"
+        "description": "直连可用"
     },
     {
         "name": "MYCOMIC",
@@ -201,5 +114,19 @@
         "key": "mycomic",
         "version": "1.1.0",
         "description": "mycomic.com漫画源, 遇到Cloudflare验证请在源设置中登录"
+    },
+    {
+        "name": "Vomic漫画",
+        "fileName": "vomic.js",
+        "key": "vomic",
+        "version": "1.0.0",
+        "description": "阅读需要登录：请在源设置中填写邮箱与密码"
+    },
+    {
+        "name": "百合会",
+        "fileName": "baihehui.js",
+        "key": "baihehui",
+        "version": "1.0.0",
+        "description": "直连可用"
     }
 ]
