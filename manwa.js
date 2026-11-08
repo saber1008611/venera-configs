@@ -128,6 +128,7 @@ class Manwa extends ComicSource {
                 type: "fixed",
                 categories: Manwa.categories.map(c => c[0]),
                 categoryParams: Manwa.categories.map(c => c[1]),
+                itemType: "category",
             },
         ],
     }
