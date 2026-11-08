@@ -4,7 +4,7 @@ class Komga extends ComicSource {
 
 	key = "komga"
 
-	version = "1.0.0"
+	version = "1.0.1"
 
 	minAppVersion = "1.4.0"
 
@@ -17,16 +17,18 @@ class Komga extends ComicSource {
 			default: "https://demo.komga.org",
 			validator: "^(https?:\\/\\/).+$"
 		},
-		// default_username: {
-		// 	title: "默认账号",
-		// 	type: "input",
-		// 	default: "demo@komga.org"
-		// },
-		// default_password: {
-		// 	title: "默认密码",
-		// 	type: "input",
-		// 	default: "komga-demo"
-		// }
+		// 留空时匿名访问（适用于无需登录的服务器）；旧版本把这两项注释掉了，
+		// 但 authToken 里仍会 loadSetting，VeneraX 会因此抛 "Null check operator"。
+		default_username: {
+			title: "默认账号",
+			type: "input",
+			default: ""
+		},
+		default_password: {
+			title: "默认密码",
+			type: "input",
+			default: ""
+		}
 	}
 
 	get baseUrl() {
