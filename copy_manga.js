@@ -4,7 +4,7 @@ class CopyManga extends ComicSource {
 
     key = "copy_manga"
 
-    version = "1.4.3"
+    version = "1.5.0"
 
     minAppVersion = "1.6.0"
 
@@ -77,7 +77,17 @@ class CopyManga extends ComicSource {
 
     static defaultImageQuality = "1500"
 
-    static defaultApiUrl = 'api.copy2000.online'
+    // 直连（无代理）实测可用的 API 域名池，按响应速度排序。
+    // 首个为默认域名；请求失败或返回非正常 JSON 时会自动切换到下一个并记住结果。
+    static apiHosts = [
+        'api.copy-manga.com',
+        'api.copy4000.com',
+        'api.copy202601.com',
+        'api.copy5000.com',
+        'api.copy2000.online',
+    ]
+
+    static defaultApiUrl = CopyManga.apiHosts[0]
 
     static searchApi = "/api/kb/web/searchb/comics"
 
@@ -168,23 +178,99 @@ class CopyManga extends ComicSource {
     }
 
     async networkGet(url, headers) {
-        try {
-            return await Network.get(url, headers);
-        } finally {
-            this.afterRequest();
-        }
+        return await this.requestWithFailover(url, (u, h) => Network.get(u, h), headers);
     }
 
     async networkPost(url, headers, data) {
+        return await this.requestWithFailover(url, (u, h) => Network.post(u, h, data), headers);
+    }
+
+    /**
+     * 判断响应是否为一次成功的 API 调用。
+     * 拷贝漫画的网关即使出错也会返回 HTTP 200，因此必须看 JSON 里的 code。
+     */
+    static isOkResponse(res) {
+        if (!res || res.status !== 200) return false;
+        let body = res.body;
+        if (body === null || body === undefined) return false;
+        if (typeof body !== 'string') return true;
+        let text = body.trim();
+        if (text.length === 0) return false;
+        if (text === 'error') return false;
+        if (text[0] !== '{' && text[0] !== '[') return false;
         try {
-            return await Network.post(url, headers, data);
-        } finally {
-            this.afterRequest();
+            let json = JSON.parse(text);
+            if (json && typeof json === 'object' && json.code !== undefined) {
+                return json.code === 200;
+            }
+            return true;
+        } catch (e) {
+            return false;
         }
     }
 
+    /**
+     * 带域名容灾的请求：先试当前域名，失败则在域名池里逐个重试。
+     * 成功后把可用域名记到本地数据里，下次启动直接用它。
+     */
+    async requestWithFailover(url, sender, headers) {
+        let current = this.apiUrl;
+        let hosts = [this.apiHost];
+        for (let h of CopyManga.apiHosts) {
+            if (hosts.indexOf(h) < 0) hosts.push(h);
+        }
+
+        // 不是走 API 主机的请求（例如封面图、第三方接口）直接发
+        if (typeof url !== 'string' || url.indexOf(current) !== 0) {
+            try {
+                return await sender(url, headers ?? this.headers);
+            } finally {
+                this.afterRequest();
+            }
+        }
+
+        let tail = url.slice(current.length);
+        let lastError = null;
+        let lastResult = null;
+        for (let host of hosts) {
+            let target = `https://${host}${tail}`;
+            try {
+                let res = await sender(target, headers ?? this.headers);
+                lastResult = res;
+                if (CopyManga.isOkResponse(res)) {
+                    if (host !== this.apiHost) {
+                        this.saveData('_api_host', host);
+                        console.log(`[copy_manga] API 域名切换到 ${host}`);
+                    }
+                    return res;
+                }
+                lastError = `HTTP ${res.status}: ${String(res.body).slice(0, 80)}`;
+            } catch (e) {
+                lastError = String(e && e.message ? e.message : e);
+            } finally {
+                this.afterRequest();
+            }
+        }
+        // 全部失败：把最后一次的响应交给上层，让它按原有逻辑报错
+        if (lastResult) return lastResult;
+        throw `所有 API 域名均不可用: ${lastError}`;
+    }
+
+    /// 当前使用的 API 域名（本地记录 > 用户设置 > 默认值）
+    get apiHost() {
+        let saved = this.loadData('_api_host');
+        if (saved) return saved;
+        let setting = null;
+        try {
+            setting = this.loadSetting('base_url');
+        } catch (e) {
+            setting = null;
+        }
+        return setting || CopyManga.defaultApiUrl;
+    }
+
     get apiUrl() {
-        return `https://${this.loadSetting('base_url')}`
+        return `https://${this.apiHost}`
     }
 
     get copyRegion() {
@@ -198,8 +284,8 @@ class CopyManga extends ComicSource {
     init() {
         // 用于储存 { 作者名 : 英文参数 }
         this.author_path_word_dict = {}
-        this.refreshSearchApi()
-        this.refreshAppApi()
+        // 后台校准可用 API 域名：不阻塞首屏，失败也不影响使用
+        this.refreshApiHost()
     }
 
     /// account
@@ -1065,10 +1151,19 @@ class CopyManga extends ComicSource {
             default: 'baseAPI'
         },
         base_url: {
-            title: "API地址",
+            title: "API地址（留空自动选择）",
             type: "input",
-            validator: '^(?!:\\/\\/)(?=.{1,253})([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}$',
+            validator: '^$|^(?!:\\/\\/)(?=.{1,253})([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}$',
             default: CopyManga.defaultApiUrl,
+        },
+        reset_api_host: {
+            title: "重置API域名",
+            type: "callback",
+            buttonText: "重新探测可用域名",
+            callback: () => {
+                this.deleteData('_api_host');
+                this.refreshApiHost();
+            }
         },
         clear_device_info: {
             title: "清除设备信息",
@@ -1114,30 +1209,76 @@ class CopyManga extends ComicSource {
         return true
     }
 
-    async refreshSearchApi() {
-        let url = "https://www.copy20.com/search"
-        let res = await fetch(url)
-        let searchApi = ""
-        if (res.status === 200) {
-            let text = await res.text()
-            let match = text.match(/const countApi = "([^"]+)"/)
-            if (match && match[1]) {
-                CopyManga.searchApi = match[1]
+    /**
+     * 逐个探测域名池，挑出第一个可用的并记录下来。
+     * 官方 network2 接口给出的现役域名优先级最高（能拿到时），
+     * 但它是明文 HTTP 返回的，可能被投毒，所以必须实测通过才采用。
+     */
+    async refreshApiHost() {
+        try {
+            let candidates = []
+            let networkHosts = await this.fetchNetworkHosts()
+            for (let h of networkHosts) {
+                if (h && candidates.indexOf(h) < 0) candidates.push(h)
             }
+            for (let h of CopyManga.apiHosts) {
+                if (candidates.indexOf(h) < 0) candidates.push(h)
+            }
+            for (let host of candidates) {
+                if (await this.probeHost(host)) {
+                    if (host !== this.apiHost) {
+                        this.saveData('_api_host', host)
+                        console.log(`[copy_manga] 使用 API 域名 ${host}`)
+                    }
+                    return host
+                }
+            }
+        } catch (e) {
+            console.log(`[copy_manga] 域名探测失败: ${e}`)
         }
+        return null
     }
 
-    async refreshAppApi() {
-        const url = "https://api.copy-manga.com/api/v3/system/network2?platform=3"
-        let res;
+    /// 从官方 network2 接口取现役域名（失败返回空数组）
+    async fetchNetworkHosts() {
+        let hosts = []
         try {
-            res = await fetch(url, { headers: this.headers });
+            let res = await fetch(
+                "https://api.copy-manga.com/api/v3/system/network2?platform=3",
+                { headers: this.headers }
+            )
+            if (res.status === 200) {
+                let data = await res.json()
+                let api = data && data.results && data.results.api
+                if (Array.isArray(api)) {
+                    for (let item of api) {
+                        let host = Array.isArray(item) ? item[0] : item
+                        // 只接受形如 xxx.xxx 的合法域名，过滤反爬假域名
+                        if (typeof host === 'string' && /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host)) {
+                            hosts.push(host)
+                        }
+                    }
+                }
+            }
+        } catch (e) {
         } finally {
-            this.afterRequest();
+            this.afterRequest()
         }
-        if (res.status === 200) {
-            let data = await res.json();
-            this.settings.base_url = data.results.api[0][0];
+        return hosts
+    }
+
+    /// 用一次轻量搜索验证域名是否真的可用
+    async probeHost(host) {
+        try {
+            let res = await Network.get(
+                `https://${host}/api/v3/search/comic?limit=1&offset=0&q=a&platform=3`,
+                this.headers
+            )
+            return CopyManga.isOkResponse(res)
+        } catch (e) {
+            return false
+        } finally {
+            this.afterRequest()
         }
     }
 }

@@ -4,7 +4,7 @@ class CopyManga extends ComicSource {
 
     key = "copy_manga_multi_accounts"
 
-    version = "1.4.1"
+    version = "1.5.0"
 
     minAppVersion = "1.6.0"
 
@@ -17,7 +17,7 @@ class CopyManga extends ComicSource {
         const reqIdUrl = "https://marketing.aiacgn.com/api/v2/adopr/query3/?format=json&ident=200100001";
         let reqId = "";
         try {
-            const response = await Network.get(reqIdUrl, this.headers);
+            const response = await this.networkGet(reqIdUrl, this.headers);
 
             if (response.status === 200) {
                 const data = JSON.parse(response.body);
@@ -80,7 +80,17 @@ class CopyManga extends ComicSource {
 
     static defaultImageQuality = "1500"
 
-    static defaultApiUrl = 'api.copy2000.online'
+    // 直连（无代理）实测可用的 API 域名池，按响应速度排序。
+    // 首个为默认域名；请求失败或返回非正常 JSON 时会自动切换到下一个并记住结果。
+    static apiHosts = [
+        'api.copy-manga.com',
+        'api.copy4000.com',
+        'api.copy202601.com',
+        'api.copy5000.com',
+        'api.copy2000.online',
+    ]
+
+    static defaultApiUrl = CopyManga.apiHosts[0]
 
     static searchApi = "/api/kb/web/searchb/comics"
 
@@ -156,8 +166,102 @@ class CopyManga extends ComicSource {
         return pseudoid;
     }
 
+    // 每次网络请求结束后调用（本源没有设备信息清理逻辑，保留空实现以兼容调用点）
+    afterRequest() {
+    }
+
+    async networkGet(url, headers) {
+        return await this.requestWithFailover(url, (u, h) => Network.get(u, h), headers);
+    }
+
+    async networkPost(url, headers, data) {
+        return await this.requestWithFailover(url, (u, h) => Network.post(u, h, data), headers);
+    }
+
+    /**
+     * 判断响应是否为一次成功的 API 调用。
+     * 拷贝漫画的网关即使出错也会返回 HTTP 200，因此必须看 JSON 里的 code。
+     */
+    static isOkResponse(res) {
+        if (!res || res.status !== 200) return false;
+        let body = res.body;
+        if (body === null || body === undefined) return false;
+        if (typeof body !== 'string') return true;
+        let text = body.trim();
+        if (text.length === 0) return false;
+        if (text === 'error') return false;
+        if (text[0] !== '{' && text[0] !== '[') return false;
+        try {
+            let json = JSON.parse(text);
+            if (json && typeof json === 'object' && json.code !== undefined) {
+                return json.code === 200;
+            }
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /**
+     * 带域名容灾的请求：先试当前域名，失败则在域名池里逐个重试。
+     * 成功后把可用域名记到本地数据里，下次启动直接用它。
+     */
+    async requestWithFailover(url, sender, headers) {
+        let current = this.apiUrl;
+        let hosts = [this.apiHost];
+        for (let h of CopyManga.apiHosts) {
+            if (hosts.indexOf(h) < 0) hosts.push(h);
+        }
+
+        if (typeof url !== 'string' || url.indexOf(current) !== 0) {
+            try {
+                return await sender(url, headers ?? this.headers);
+            } finally {
+                this.afterRequest();
+            }
+        }
+
+        let tail = url.slice(current.length);
+        let lastError = null;
+        let lastResult = null;
+        for (let host of hosts) {
+            let target = `https://${host}${tail}`;
+            try {
+                let res = await sender(target, headers ?? this.headers);
+                lastResult = res;
+                if (CopyManga.isOkResponse(res)) {
+                    if (host !== this.apiHost) {
+                        this.saveData('_api_host', host);
+                        console.log(`[copy_manga_multi_accounts] API 域名切换到 ${host}`);
+                    }
+                    return res;
+                }
+                lastError = `HTTP ${res.status}: ${String(res.body).slice(0, 80)}`;
+            } catch (e) {
+                lastError = String(e && e.message ? e.message : e);
+            } finally {
+                this.afterRequest();
+            }
+        }
+        if (lastResult) return lastResult;
+        throw `所有 API 域名均不可用: ${lastError}`;
+    }
+
+    /// 当前使用的 API 域名（本地记录 > 用户设置 > 默认值）
+    get apiHost() {
+        let saved = this.loadData('_api_host');
+        if (saved) return saved;
+        let setting = null;
+        try {
+            setting = this.loadSetting('base_url');
+        } catch (e) {
+            setting = null;
+        }
+        return setting || CopyManga.defaultApiUrl;
+    }
+
     get apiUrl() {
-        return `https://${this.loadSetting('base_url')}`
+        return `https://${this.apiHost}`
     }
 
     get copyRegion() {
@@ -172,8 +276,8 @@ class CopyManga extends ComicSource {
         // 用于储存 { 作者名 : 英文参数 }
         this.author_path_word_dict = {}
         this._clearMergeState();
-        this.refreshSearchApi()
-        this.refreshAppApi()
+        // 后台校准可用 API 域名：不阻塞首屏，失败也不影响使用
+        this.refreshApiHost()
     }
 
     /// 主账号（用于评论、看漫画）
@@ -181,7 +285,7 @@ class CopyManga extends ComicSource {
         login: async (account, pwd) => {
             let salt = randomInt(1000, 9999)
             let base64 = Convert.encodeBase64(Convert.encodeUtf8(`${pwd}-${salt}`))
-            let res = await Network.post(
+            let res = await this.networkPost(
                 `${this.apiUrl}/api/v3/login`,
                 {
                     ...this.headers,
@@ -210,7 +314,7 @@ class CopyManga extends ComicSource {
             title: "拷贝漫画M",
             type: "singlePageWithMultiPart",
             load: async () => {
-                let dataStr = await Network.get(
+                let dataStr = await this.networkGet(
                     `${this.apiUrl}/api/v3/h5/homeIndex`,
                     this.headers
                 )
@@ -359,7 +463,7 @@ class CopyManga extends ComicSource {
             }
 
 
-            let res = await Network.get(
+            let res = await this.networkGet(
                 category_url,
                 this.headers
             )
@@ -477,7 +581,7 @@ class CopyManga extends ComicSource {
             // 通过onClickTag传入时有"作者:"前缀，处理这种情况
             if (author && author in this.author_path_word_dict) {
                 let path_word = encodeURIComponent(this.author_path_word_dict[author]);
-                res = await Network.get(
+                res = await this.networkGet(
                     `${this.apiUrl}/api/v3/comics?limit=30&offset=${(page - 1) * 30}&ordering=-datetime_updated&author=${path_word}`,
                     this.headers
                 )
@@ -492,7 +596,7 @@ class CopyManga extends ComicSource {
                 let search_url = this.loadSetting('search_api') === "webAPI"
                     ? `${this.apiUrl}${CopyManga.searchApi}`
                     : `${this.apiUrl}/api/v3/search/comic`
-                res = await Network.get(
+                res = await this.networkGet(
                     `${search_url}?limit=30&offset=${(page - 1) * 30}&q=${keyword}&q_type=${q_type}`,
                     this.headers
                 )
@@ -575,7 +679,7 @@ class CopyManga extends ComicSource {
             let is_collect = isAdding ? 1 : 0;
             let headers = this._headersForToken(token);
             let reqId = await this.getReqID();
-            let comicData = await Network.get(
+            let comicData = await this.networkGet(
                 `${this.apiUrl}/api/v3/comic2/${comicId}?in_mainland=true&request_id=${reqId}&platform=3`,
                 headers
             );
@@ -583,7 +687,7 @@ class CopyManga extends ComicSource {
                 throw `Invalid status code: ${comicData.status}`;
             }
             let comic_id = JSON.parse(comicData.body).results.comic.uuid;
-            let res = await Network.post(
+            let res = await this.networkPost(
                 `${this.apiUrl}/api/v3/member/collect/comic`,
                 {
                     ...headers,
@@ -644,7 +748,7 @@ class CopyManga extends ComicSource {
 
     async _fetchFavoritesPage(token, offset, ordering, name) {
         let url = `${this.apiUrl}/api/v3/member/collect/comics?limit=30&offset=${offset}&free_type=1&ordering=${ordering}`;
-        let res = await Network.get(url, this._headersForToken(token));
+        let res = await this.networkGet(url, this._headersForToken(token));
         if (res.status === 401) {
             throw `${name ? name + " " : ""}Login expired`;
         }
@@ -669,7 +773,7 @@ class CopyManga extends ComicSource {
                 if (!token) return null;
                 try {
                     let headers = this._headersForToken(token);
-                    let res = await Network.get(`${this.apiUrl}/api/v3/comic2/${comicId}/query`, headers);
+                    let res = await this.networkGet(`${this.apiUrl}/api/v3/comic2/${comicId}/query`, headers);
                     if (res.status === 200) {
                         let data = JSON.parse(res.body);
                         if (data.results.collect != null) {
@@ -867,7 +971,7 @@ class CopyManga extends ComicSource {
             let getChapters = async (id, groups) => {
                 let fetchSingle = async (id, path) => {
                     let reqId = await this.getReqID();
-                    let res = await Network.get(
+                    let res = await this.networkGet(
                         `${this.apiUrl}/api/v3/comic/${id}/group/${path}/chapters?limit=100&offset=0&in_mainland=true&request_id=${reqId}`,
                         this.headers
                     );
@@ -885,7 +989,7 @@ class CopyManga extends ComicSource {
                     if (maxChapter > 100) {
                         let offset = 100;
                         while (offset < maxChapter) {
-                            res = await Network.get(
+                            res = await this.networkGet(
                                 `${this.apiUrl}/api/v3/comic/${id}/group/${path}/chapters?limit=100&offset=${offset}`,
                                 this.headers
                             );
@@ -939,7 +1043,7 @@ class CopyManga extends ComicSource {
             }
             let reqId = await this.getReqID();
             let results = await Promise.all([
-                Network.get(
+                this.networkGet(
                     `${this.apiUrl}/api/v3/comic2/${id}?in_mainland=true&request_id=${reqId}&platform=3`,
                     this.headers
                 ),
@@ -992,7 +1096,7 @@ class CopyManga extends ComicSource {
             while (attempt < maxAttempts) {
                 try {
                     let reqId = await this.getReqID();
-                    res = await Network.get(
+                    res = await this.networkGet(
                         `${this.apiUrl}/api/v3/comic/${comicId}/chapter2/${epId}?in_mainland=true&request_id=${reqId}`,
                         {
                             ...this.headers
@@ -1064,7 +1168,7 @@ class CopyManga extends ComicSource {
             if (replyTo) {
                 url = url + `&reply_id=${replyTo}&_update=true`;
             }
-            let res = await Network.get(
+            let res = await this.networkGet(
                 url,
                 this.headers,
             );
@@ -1102,7 +1206,7 @@ class CopyManga extends ComicSource {
             if (!replyTo) {
                 replyTo = '';
             }
-            let res = await Network.post(
+            let res = await this.networkPost(
                 `${this.apiUrl}/api/v3/member/comment`,
                 {
                     ...this.headers,
@@ -1124,7 +1228,7 @@ class CopyManga extends ComicSource {
         },
         loadChapterComments: async (comicId, epId, page, replyTo) => {
             let url = `${this.apiUrl}/api/v3/roasts?chapter_id=${epId}&limit=20&offset=${(page - 1) * 20}`;
-            let res = await Network.get(
+            let res = await this.networkGet(
                 url,
                 this.headers,
             );
@@ -1156,7 +1260,7 @@ class CopyManga extends ComicSource {
             if (!token) {
                 throw "未登录"
             }
-            let res = await Network.post(
+            let res = await this.networkPost(
                 `${this.apiUrl}/api/v3/member/roast`,
                 {
                     ...this.headers,
@@ -1293,10 +1397,19 @@ class CopyManga extends ComicSource {
             default: 'baseAPI'
         },
         base_url: {
-            title: "API地址",
+            title: "API地址（留空自动选择）",
             type: "input",
-            validator: '^(?!:\\/\\/)(?=.{1,253})([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}$',
-            default: CopyManga.defaultApiUrl,
+            validator: '^$|^(?!:\\/\\/)(?=.{1,253})([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}$',
+            default: "",
+        },
+        reset_api_host: {
+            title: "重新探测可用 API 域名",
+            type: "callback",
+            buttonText: "开始探测",
+            callback: () => {
+                this.deleteData('_api_host');
+                this.refreshApiHost();
+            },
         },
         clear_device_info: {
             title: "清除设备信息",
@@ -1306,7 +1419,7 @@ class CopyManga extends ComicSource {
                 this.deleteData("_deviceinfo");
                 this.deleteData("_device");
                 this.deleteData("_pseudoid");
-                this.refreshAppApi();
+                this.refreshApiHost();
             }
         },
         sub_accounts: {
@@ -1326,7 +1439,7 @@ class CopyManga extends ComicSource {
                     let acc = subAccounts[i];
                     let salt = randomInt(1000, 9999);
                     let base64 = Convert.encodeBase64(Convert.encodeUtf8(`${acc.password}-${salt}`));
-                    let res = await Network.post(
+                    let res = await this.networkPost(
                         `${this.apiUrl}/api/v3/login`,
                         {
                             ...this._headersForToken(""),
@@ -1404,6 +1517,75 @@ class CopyManga extends ComicSource {
         if (res.status === 200) {
             let data = await res.json();
             this.settings.base_url = data.results.api[0][0];
+        }
+    }
+    /**
+     * 逐个探测域名池，挑出第一个可用的并记录下来。
+     */
+    async refreshApiHost() {
+        try {
+            let candidates = []
+            let networkHosts = await this.fetchNetworkHosts()
+            for (let h of networkHosts) {
+                if (h && candidates.indexOf(h) < 0) candidates.push(h)
+            }
+            for (let h of CopyManga.apiHosts) {
+                if (candidates.indexOf(h) < 0) candidates.push(h)
+            }
+            for (let host of candidates) {
+                if (await this.probeHost(host)) {
+                    if (host !== this.apiHost) {
+                        this.saveData('_api_host', host)
+                        console.log(`[copy_manga_multi_accounts] 使用 API 域名 ${host}`)
+                    }
+                    return host
+                }
+            }
+        } catch (e) {
+            console.log(`[copy_manga_multi_accounts] 域名探测失败: ${e}`)
+        }
+        return null
+    }
+
+    /// 从官方 network2 接口取现役域名（失败返回空数组）
+    async fetchNetworkHosts() {
+        let hosts = []
+        try {
+            let res = await Network.get(
+                "https://api.copy-manga.com/api/v3/system/network2?platform=3",
+                this.headers
+            )
+            if (res.status === 200) {
+                let data = JSON.parse(res.body)
+                let api = data && data.results && data.results.api
+                if (Array.isArray(api)) {
+                    for (let item of api) {
+                        let host = Array.isArray(item) ? item[0] : item
+                        if (typeof host === 'string' && /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host)) {
+                            hosts.push(host)
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+        } finally {
+            this.afterRequest()
+        }
+        return hosts
+    }
+
+    /// 用一次轻量搜索验证域名是否真的可用
+    async probeHost(host) {
+        try {
+            let res = await Network.get(
+                `https://${host}/api/v3/search/comic?limit=1&offset=0&q=a&platform=3`,
+                this.headers
+            )
+            return CopyManga.isOkResponse(res)
+        } catch (e) {
+            return false
+        } finally {
+            this.afterRequest()
         }
     }
 }
