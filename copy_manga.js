@@ -323,53 +323,81 @@ class CopyManga extends ComicSource {
     explore = [
         {
             title: "拷贝漫画",
-            type: "singlePageWithMultiPart",
-            load: async () => {
-                let dataStr = await this.networkGet(
-                    `${this.apiUrl}/api/v3/h5/homeIndex`,
-                    this.headers
-                )
-
-                if (dataStr.status !== 200) {
-                    throw `Invalid status code: ${dataStr.status}`
+            type: "multiPageComicList",
+            optionList: [
+                {
+                    label: "题材",
+                    type: "select",
+                    options: ["-全部"].concat(
+                        Object.keys(CopyManga.category_param_dict)
+                            .filter(k => k !== "全部")
+                            .map(k => `${k}-${k}`)
+                    ),
+                },
+                {
+                    label: "排序",
+                    type: "select",
+                    options: [
+                        "*datetime_updated-时间倒序",
+                        "datetime_updated-时间正序",
+                        "*popular-热度倒序",
+                        "popular-热度正序",
+                    ],
+                },
+                {
+                    label: "类型",
+                    type: "select",
+                    options: [
+                        "-全部",
+                        "japan-日漫",
+                        "korea-韩漫",
+                        "west-美漫",
+                        "finish-已完结",
+                    ],
+                },
+            ],
+            load: async (page, options, filters) => {
+                filters = filters || {}
+                options = options || []
+                let themeName = filters["题材"] ?? options[0] ?? "全部"
+                let orderingRaw = filters["排序"] ?? options[1] ?? "*datetime_updated"
+                let top = filters["类型"] ?? options[2] ?? ""
+                let theme = CopyManga.category_param_dict[themeName] || ""
+                let ordering = orderingRaw.replace("*", "-")
+                let url = `${this.apiUrl}/api/v3/comics?limit=30&offset=${(page - 1) * 30}&ordering=${ordering}&theme=${theme}&top=${top}`
+                let res = await this.networkGet(url, this.headers)
+                if (res.status !== 200) {
+                    throw `Invalid status code: ${res.status}`
                 }
-
-                let data = JSON.parse(dataStr.body)
-
-                function parseComic(comic) {
-                    if (comic["comic"] !== null && comic["comic"] !== undefined) {
-                        comic = comic["comic"]
+                let data = JSON.parse(res.body)
+                let list = data["results"]["list"].map(item => {
+                    let comic = item
+                    if (item["comic"] !== null && item["comic"] !== undefined) {
+                        comic = item["comic"]
                     }
                     let tags = []
                     if (comic["theme"] !== null && comic["theme"] !== undefined) {
                         tags = comic["theme"].map(t => t["name"])
                     }
                     let author = null
-
                     if (Array.isArray(comic["author"]) && comic["author"].length > 0) {
                         author = comic["author"][0]["name"]
                     }
-
                     return {
                         id: comic["path_word"],
                         title: comic["name"],
                         subTitle: author,
                         cover: comic["cover"],
-                        tags: tags
+                        tags: tags,
+                        description: comic["datetime_updated"],
                     }
+                })
+                let total = data["results"]["total"] || list.length
+                return {
+                    comics: list,
+                    maxPage: Math.max(1, Math.ceil(total / 30)),
                 }
-
-                let res = {}
-                res["推荐"] = data["results"]["recComics"]["list"].map(parseComic)
-                res["热门"] = data["results"]["hotComics"].map(parseComic)
-                res["最新"] = data["results"]["newComics"].map(parseComic)
-                res["完结"] = data["results"]["finishComics"]["list"].map(parseComic)
-                res["今日排行"] = data["results"]["rankDayComics"]["list"].map(parseComic)
-                res["本周排行"] = data["results"]["rankWeekComics"]["list"].map(parseComic)
-                res["本月排行"] = data["results"]["rankMonthComics"]["list"].map(parseComic)
-
-                return res
-            }
+            },
         }
     ]
 

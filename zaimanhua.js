@@ -113,14 +113,54 @@ class Zaimanhua extends ComicSource {
     {
       title: "再漫画 更新",
       type: "multiPageComicList",
-      load: async (page) => {
+      optionList: [
+        {
+          label: "排序",
+          type: "select",
+          options: ["1-更新", "2-人气"],
+        },
+        {
+          label: "题材",
+          type: "select",
+          options: Object.keys(Zaimanhua.categoryParamMap).map(
+            (name) => Zaimanhua.categoryParamMap[name] + "-" + name
+          ),
+        },
+        {
+          label: "状态",
+          type: "select",
+          options: ["0-全部", "2309-连载中", "2310-已完结", "29205-短篇"],
+        },
+        {
+          label: "地区",
+          type: "select",
+          options: [
+            "0-全部",
+            "2304-日本",
+            "2305-韩国",
+            "2306-欧美",
+            "2307-港台",
+            "2308-内地",
+            "8435-其他",
+          ],
+        },
+      ],
+      load: async (page, options) => {
+        options = options || [];
+        const sortType = options[0] || "1";
+        const cate = options[1] || "0";
+        const status = options[2] || "0";
+        const zone = options[3] || "0";
         const res = await Network.get(
-          this.buildUrl(`comic/update/list/0/${page}`),
+          this.buildUrl(
+            `comic/filter/list?status=${status}&theme=0&zone=${zone}&cate=${cate}&sortType=${sortType}&page=${page}&size=20`
+          ),
           this.headers
         );
         const data = JSON.parse(res.body).data;
         return {
-          comics: data.map((item) => this.parseComic(item)),
+          comics: data.comicList.map((item) => this.parseComic(item)),
+          maxPage: Math.ceil(data.totalNum / 20),
         };
       },
     },

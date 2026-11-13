@@ -181,20 +181,97 @@ class HotManga extends ComicSource {
     explore = [
         {
             title: "热辣漫画",
-            type: "singlePageWithMultiPart",
-            load: async () => {
-                let dataStr = await this.networkGet(
-                    `${this.apiUrl}/api/v3/h5/homeIndex`,
-                    this.headers
-                )
-
-                if (dataStr.status !== 200) {
-                    throw `Invalid status code: ${dataStr.status}`
+            type: "multiPageComicList",
+            optionList: [
+                { label: "多条件可叠加，改完点应用即时生效", type: "header" },
+                {
+                    label: "主题",
+                    type: "select",
+                    options: Object.keys(HotManga.category_param_dict).map(
+                        name => HotManga.category_param_dict[name] + "-" + name
+                    )
+                },
+                {
+                    label: "排序",
+                    type: "sort",
+                    options: ["更新时间", "热度"],
+                    default: 0,
+                    defaultAsc: false,
+                },
+                {
+                    // 非空时改写排行榜接口，这样「排行榜」不用单独占一个发现页。
+                    label: "榜单",
+                    type: "select",
+                    options: ["-不启用", "day-上升最快", "week-最近7天", "month-最近30天", "total-总榜单"],
+                },
+                {
+                    label: "榜单地区",
+                    type: "select",
+                    options: ["-非韩漫", "1-韩漫"],
+                },
+            ],
+            load: async (page, options, filters) => {
+                filters = filters || {}
+                options = options || []
+                let rankType = filters["榜单"] ?? options[3] ?? ""
+                if (rankType) {
+                    let region = filters["榜单地区"] ?? options[4] ?? ""
+                    let rankUrl = `${this.apiUrl}/api/v3/ranks?free_type=1&limit=30&offset=${(page - 1) * 30}&_update=true&type=1&region=${region}&date_type=${rankType}`
+                    let rankRes = await this.networkGet(rankUrl, this.headers)
+                    if (rankRes.status !== 200) {
+                        throw `Invalid status code: ${rankRes.status}`
+                    }
+                    let rankData = JSON.parse(rankRes.body)
+                    let list = rankData["results"]["list"].map(item => {
+                        let comic = item
+                        if (item["comic"] !== null && item["comic"] !== undefined) {
+                            comic = item["comic"]
+                        }
+                        let tags = []
+                        if (comic["theme"] !== null && comic["theme"] !== undefined) {
+                            tags = comic["theme"].map(t => t["name"])
+                        }
+                        let author = null
+                        if (Array.isArray(comic["author"]) && comic["author"].length > 0) {
+                            author = comic["author"][0]["name"]
+                        }
+                        let rank = item["sort"]
+                        let rise = item["rise_sort"] || 0
+                        let popular = item["popular"] || 0
+                        let arrow = rise > 0 ? "▲" : (rise < 0 ? "▽" : "-")
+                        let description = `${rank} ${arrow}\n${author || ""}\n🔥${(popular / 10000).toFixed(1)}W`
+                        return {
+                            id: comic["path_word"],
+                            title: comic["name"],
+                            subTitle: author,
+                            cover: comic["cover"],
+                            tags: tags,
+                            description: description,
+                        }
+                    })
+                    let rankTotal = rankData["results"]["total"] || list.length
+                    return {
+                        comics: list,
+                        maxPage: Math.max(1, Math.ceil(rankTotal / 30)),
+                    }
                 }
-
-                let data = JSON.parse(dataStr.body)
-
-                function parseComic(comic) {
+                let theme = filters["主题"] ?? options[0] ?? ""
+                // 排序值形如 "1:desc"（下标:方向）。
+                let sort = filters["排序"] ?? (options[1] ? options[1] : "0:desc")
+                let sortParts = String(sort).split(":")
+                let sortIndex = parseInt(sortParts[0], 10)
+                if (isNaN(sortIndex)) sortIndex = 0
+                let ascending = sortParts.length > 1 && sortParts[1] === "asc"
+                let fields = ["datetime_updated", "popular"]
+                let field = fields[sortIndex] || fields[0]
+                let ordering = (ascending ? "" : "-") + field
+                let url = `${this.apiUrl}/api/v3/comics?free_type=1&limit=30&offset=${(page - 1) * 30}&ordering=${ordering}&theme=${theme}`
+                let res = await this.networkGet(url, this.headers)
+                if (res.status !== 200) {
+                    throw `Invalid status code: ${res.status}`
+                }
+                let data = JSON.parse(res.body)
+                let list = data["results"]["list"].map(comic => {
                     if (comic["comic"] !== null && comic["comic"] !== undefined) {
                         comic = comic["comic"]
                     }
@@ -203,27 +280,23 @@ class HotManga extends ComicSource {
                         tags = comic["theme"].map(t => t["name"])
                     }
                     let author = null
-
                     if (Array.isArray(comic["author"]) && comic["author"].length > 0) {
                         author = comic["author"][0]["name"]
                     }
-
                     return {
                         id: comic["path_word"],
                         title: comic["name"],
                         subTitle: author,
                         cover: comic["cover"],
-                        tags: tags
+                        tags: tags,
+                        description: comic["datetime_updated"]
                     }
+                })
+                let total = data["results"]["total"] || 0
+                return {
+                    comics: list,
+                    maxPage: Math.ceil(total / 30)
                 }
-
-                let res = {}
-                res["推荐漫画"] = data["results"]["recComics"]["list"].map(parseComic)
-                res["每周免费漫画排行"] = data["results"]["rankWeeklyFreeComics"]["list"].map(parseComic)
-                res["每周付费漫画排行"] = data["results"]["rankWeeklyChargeComics"]["list"].map(parseComic)
-                res["付费漫画更新"] = data["results"]["updateWeeklyChargeComics"]["list"].map(parseComic)
-                res["免费漫画更新"] = data["results"]["updateWeeklyFreeComics"]["list"].map(parseComic)
-                return res
             }
         }
     ]

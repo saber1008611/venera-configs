@@ -221,9 +221,27 @@ class ZeroByW33 extends ComicSource {
     }
 
     async fetchBody(label, url) {
-        let res = await Network.get(url, this.pageHeaders())
-        if (res.status !== 200) throw label + " 请求失败: " + res.status
-        return res.body
+        // 这条线路会偶发 RST / 5xx（时刻、域名都可能抖），单次失败就直接抛错对
+        // 用户太糟：先原地重试，第二次再重新探一次域名换 base。
+        let lastError = null
+        let currentUrl = url
+        for (let attempt = 0; attempt < 3; attempt++) {
+            let retryable = true
+            try {
+                let res = await Network.get(currentUrl, this.pageHeaders())
+                if (res.status === 200) return res.body
+                retryable = res.status >= 500 || res.status === 429
+                lastError = label + " 请求失败: " + res.status
+            } catch (e) {
+                lastError = String(e && e.message ? e.message : e)
+            }
+            if (!retryable) break
+            if (attempt === 1) {
+                await this.ensureDomain()
+                currentUrl = this.base + url.slice(url.indexOf("/", 8))
+            }
+        }
+        throw lastError
     }
 
     /**
@@ -335,22 +353,74 @@ class ZeroByW33 extends ComicSource {
         return url
     }
 
-    // ============ 大厅：最新上架 ============
+    // ============ 大厅：筛选浏览 ============
+    // 语义照 Mihon 的 zerobyw 扩展（Filters.kt）：分类 / 进度 / 性质都是
+    // 「选中后拼成 query 参数，空值表示全部」，排序多一个升/降方向。
     explore = [
         {
             title: "zero搬运网",
-            type: "multiPartPage",
-            load: async (page) => {
+            type: "multiPageComicList",
+            optionList: [
+                { label: "文本搜索时下面的筛选会被忽略", type: "header" },
+                {
+                    label: "分类",
+                    type: "select",
+                    options: ["-全部"].concat(
+                        Object.keys(this.catMap).map(k => k + "-" + this.catMap[k])
+                    ),
+                },
+                {
+                    label: "进度",
+                    type: "select",
+                    options: ["-全部", "0-连载中", "1-已完结"],
+                },
+                {
+                    label: "性质",
+                    type: "select",
+                    options: [
+                        "-全部",
+                        "全中文-全中文",
+                        "一半中文一半生肉-一半中文一半生肉",
+                        "全生肉-全生肉",
+                    ],
+                },
+                {
+                    label: "排序",
+                    type: "sort",
+                    options: ["最新上架", "人气", "收藏"],
+                    default: 0,
+                    defaultAsc: false,
+                },
+            ],
+            load: async (page, options, filters) => {
                 await this.ensureDomain()
-                let body = await this.fetchBody("latest", this.base + "/pc/pc/?order=addtime&dir=desc&page=1")
+                filters = filters || {}
+                options = options || []
+                // 键名取筛选条件；没有筛选项时回退到位置参数。
+                let cate = filters["分类"] ?? options[0] ?? ""
+                let jindu = filters["进度"] ?? options[1] ?? ""
+                let shuxing = filters["性质"] ?? options[2] ?? ""
+                let sort = filters["排序"] ?? (options[3] ? options[3] + ":desc" : "0:desc")
+                // 排序值形如 "1:desc"（下标:方向）。
+                let sortParts = String(sort).split(":")
+                let sortIndex = parseInt(sortParts[0], 10)
+                if (isNaN(sortIndex)) sortIndex = 0
+                let ascending = sortParts.length > 1 ? sortParts[1] === "asc" : false
+                let orders = ["addtime", "views", "favores"]
+                let order = orders[sortIndex] || "addtime"
+
+                let url = this.base + "/pc/pc/?page=" + page
+                if (cate !== "" && cate !== "all") url += "&category_id=" + cate
+                if (jindu !== "" && jindu !== "all") url += "&jindu=" + jindu
+                if (shuxing !== "" && shuxing !== "all") {
+                    url += "&shuxing=" + encodeURIComponent(shuxing)
+                }
+                url += "&order=" + order + "&dir=" + (ascending ? "asc" : "desc")
+
+                let body = await this.fetchBody("browse", url)
                 let comics = this.parseGrid(body)
-                return [
-                    {
-                        title: "LATEST",
-                        comics,
-                        viewMore: { page: "category", attributes: { category: "全部", param: "cat_all" } },
-                    }
-                ]
+                let maxPage = this.extractMaxPage(body)
+                return { comics: comics, maxPage: Math.max(maxPage, page) }
             }
         }
     ]

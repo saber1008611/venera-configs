@@ -10,7 +10,7 @@
 class WNACG extends ComicSource {
     name = "紳士漫畫"
     key = "wnacg"
-    version = "1.0.0"
+    version = "1.1.0"
     minAppVersion = "1.6.0"
     url = "https://www.wnacg.site"
 
@@ -40,6 +40,15 @@ class WNACG extends ComicSource {
     ]
 
     static rankingTypes = [
+        ["day", "今日排行"],
+        ["week", "本周排行"],
+        ["month", "本月排行"],
+        ["year", "今年排行"],
+    ]
+
+    // 排序（值 → 名称），空值就是站点默认的「最近更新」
+    static rankingOptions = [
+        ["", "最新更新"],
         ["day", "今日排行"],
         ["week", "本周排行"],
         ["month", "本月排行"],
@@ -158,12 +167,52 @@ class WNACG extends ComicSource {
         return { comics: comics, maxPage: next ? page + 1 : page }
     }
 
+    // 发现页的筛选：排序与分类可以同时生效
+    listUrlFor(ranking, cate, page) {
+        let catePart = cate ? "-cate-" + cate : ""
+        if (ranking) {
+            return this.base + "/albums-favorite_ranking-page-" + page + "-type-" + ranking + catePart + ".html"
+        }
+        return this.base + "/albums-index-page-" + page + catePart + ".html"
+    }
+
+    async loadFilteredList(ranking, cate, page) {
+        let body = await this.fetchBody("list", this.listUrlFor(ranking, cate, page))
+        let comics = this.parseList(body)
+        let next = this.hasNextPage(body, page)
+        return { comics: comics, maxPage: next ? page + 1 : page }
+    }
+
     // ============ 发现 ============
     explore = [
         {
             title: "紳士漫畫-最近更新",
             type: "multiPageComicList",
-            load: async (page) => await this.loadList("", page),
+            optionList: [
+                {
+                    label: "排序",
+                    type: "select",
+                    options: WNACG.rankingOptions.map(r => r[0] + "-" + r[1]),
+                },
+                {
+                    label: "分类",
+                    type: "select",
+                    options: WNACG.categories.map(c => c[0] + "-" + c[1]),
+                },
+            ],
+            load: async (page, options) => {
+                let ranking = (options && options[0]) || ""
+                let cate = (options && options[1]) || ""
+                try {
+                    return await this.loadFilteredList(ranking, cate, page)
+                } catch (e) {
+                    // 排序与分类组合的 URL 站点偶尔不认，退回单条件
+                    if (ranking && cate) {
+                        return await this.loadFilteredList(ranking, "", page)
+                    }
+                    throw e
+                }
+            },
         },
     ]
 

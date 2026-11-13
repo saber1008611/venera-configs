@@ -7,7 +7,7 @@ class JM extends ComicSource {
     // unique id of the source
     key = "jm"
 
-    version = "1.4.0"
+    version = "1.4.1"
 
     minAppVersion = "1.5.0"
 
@@ -20,28 +20,59 @@ class JM extends ComicSource {
 
     dailyCheckInInProgress = false
 
+    // 官方域名表（newsvr-2025.txt）里当前在用的 API 线路。
+    // 顺序按实测可用性排：cdnbtd / cdngwc.club 在这台机器上会超时，
+    // 放在后面，先试能通的，避免首次请求就等满超时。
+    static apiDomains = [
+        "www.cdngwc.net",
+        "www.cdnutc.cc",
+        "www.cdngwc.club",
+        "www.cdnbtd.cc",
+    ]
+
+    // 取不到官方域名表时的兜底线路。旧域名 cdntwice / cdnsha / cdnaspa 已被墙或
+    // 源站下线（实测 522 / RST），2026-11 起官方换成了下面这几台。
     static fallbackServers = [
-        "www.cdntwice.org",
-        "www.cdnsha.org",
-        "www.cdnaspa.cc",
-        "www.cdnntr.cc",
+        "www.cdngwc.net",
+        "www.cdnutc.cc",
+        "www.cdngwc.club",
+        "www.cdnbtd.cc",
     ];
 
     static imageUrl = "https://cdn-msp.jmapinodeudzn.net"
 
     static ua = "Mozilla/5.0 (Linux; Android 10; K; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/130.0.0.0 Mobile Safari/537.36"
 
+    // 单次请求超时（毫秒）。线路半死不活时不要让界面卡几十秒。
+    static requestTimeoutMs = 12000
+
+    // 某台线路失败后，冷却多久不再尝试（毫秒）。
+    static hostCooldownMs = 5 * 60 * 1000
+
     get ua() {
         return JM.ua;
     }
 
-    get baseUrl() {
+    /// 当前使用的 API 域名（记住上次可用的那一台）。
+    get baseHost() {
+        let saved = this.loadData('_api_host')
+        if (saved && JM.apiDomains.includes(saved)) return saved
         let index = parseInt(this.loadSetting('apiDomain')) - 1
-        return `https://${JM.apiDomains[index]}`
+        let configured = JM.apiDomains[index]
+        if (configured) return configured
+        return JM.apiDomains[0]
     }
 
-    get imageUrl() {
-        return JM.imageUrl
+    get baseUrl() {
+        return `https://${this.baseHost}`
+    }
+
+    /// 依次尝试的线路：当前 > 官方表 > 兜底表（去重、最多 4 个）。
+    candidateHosts() {
+        let list = [this.baseHost]
+        for (let host of JM.apiDomains) if (!list.includes(host)) list.push(host)
+        for (let host of JM.fallbackServers) if (!list.includes(host)) list.push(host)
+        return list.slice(0, 4)
     }
 
     overwriteApiDomains(domains) {
@@ -253,35 +284,100 @@ class JM extends ComicSource {
      * @returns {Promise<string>}
      */
     async get(url) {
-        let time = Math.floor(Date.now() / 1000)
-        let kJmSecret = "185Hcomic3PAPP7R"
-        let res = await Network.get(url, this.getApiHeaders(time))
-        if(res.status !== 200) {
-            if(res.status === 401) {
-                let json = JSON.parse(res.body)
-                let message = json.errorMsg
-                if(message === "請先登入會員" && this.isLogged) {
-                    throw 'Login expired'
-                }
-                throw message ?? 'Invalid Status Code: ' + res.status
-            }
-            throw 'Invalid Status Code: ' + res.status
-        }
-        let json = JSON.parse(res.body)
-        let data = json.data
-        if(typeof data !== 'string') {
-            throw 'Invalid Data'
-        }
-        return this.convertData(data, `${time}${kJmSecret}`)
+        let result = await this.requestWithFailover(url, "GET", null)
+        return this.decodeResponse(result.res, result.time)
     }
 
     async post(url, body) {
-        let time = Math.floor(Date.now() / 1000)
+        let result = await this.requestWithFailover(url, "POST", body)
+        return this.decodeResponse(result.res, result.time)
+    }
+
+    /// 站点换域名很频繁：网络错误 / 5xx 时自动换下一台线路，并记住能用的那台。
+    /// 死掉的线路会记一段时间（默认 5 分钟）不再尝试，避免每次操作都卡在超时上。
+    async requestWithFailover(url, method, body) {
+        let hosts = this.aliveHosts()
+        let lastError = null
+        for (let host of hosts) {
+            let target = url.replace(/^https:\/\/[^/]+/, `https://${host}`)
+            let time = Math.floor(Date.now() / 1000)
+            try {
+                let res = await this.withTimeout(
+                    method === "POST"
+                        ? Network.post(target, {
+                            ...this.getApiHeaders(time),
+                            "Content-Type": "application/x-www-form-urlencoded"
+                        }, body)
+                        : Network.get(target, this.getApiHeaders(time)),
+                    JM.requestTimeoutMs,
+                    "请求"
+                )
+                if (res.status === 200 || res.status === 401) {
+                    this.clearHostFailure(host)
+                    if (host !== this.baseHost) this.saveData('_api_host', host)
+                    return { res: res, time: time }
+                }
+                if (res.status < 500) {
+                    this.clearHostFailure(host)
+                    return { res: res, time: time }
+                }
+                this.markHostFailed(host)
+                lastError = 'Invalid Status Code: ' + res.status
+            } catch (e) {
+                this.markHostFailed(host)
+                lastError = String(e && e.message ? e.message : e)
+            }
+        }
+        throw lastError ?? 'All API domains failed'
+    }
+
+    /// 给请求套一层超时，避免某台线路半死不活时把界面卡住几十秒。
+    async withTimeout(promise, ms, label) {
+        let timer = new Promise((resolve, reject) => {
+            setTimeout(() => reject(new Error(`${label || '请求'}超时`)), ms)
+        })
+        return await Promise.race([promise, timer])
+    }
+
+    hostFailures() {
+        let raw = this.loadData('_host_failures')
+        if (!raw) return {}
+        try {
+            let parsed = JSON.parse(raw)
+            return parsed && typeof parsed === 'object' ? parsed : {}
+        } catch (e) {
+            return {}
+        }
+    }
+
+    markHostFailed(host) {
+        let failures = this.hostFailures()
+        failures[host] = Date.now() + JM.hostCooldownMs
+        this.saveData('_host_failures', JSON.stringify(failures))
+    }
+
+    clearHostFailure(host) {
+        let failures = this.hostFailures()
+        if (failures[host] === undefined) return
+        delete failures[host]
+        this.saveData('_host_failures', JSON.stringify(failures))
+    }
+
+    /// 可用线路：当前线路优先，然后官方表与兜底表里没被标记失败的；
+    /// 全部都被标记失败时退回完整列表（可能是冷却期判断错了）。
+    aliveHosts() {
+        let failures = this.hostFailures()
+        let now = Date.now()
+        let all = this.candidateHosts()
+        let alive = all.filter(host => {
+            let until = failures[host]
+            return until === undefined || until <= now
+        })
+        return alive.length > 0 ? alive : all
+    }
+
+    decodeResponse(res, time) {
         let kJmSecret = "185Hcomic3PAPP7R"
-        let res = await Network.post(url, {
-            ...this.getApiHeaders(time),
-            "Content-Type": "application/x-www-form-urlencoded"
-        }, body)
         if(res.status !== 200) {
             if(res.status === 401) {
                 let json = JSON.parse(res.body)
@@ -378,44 +474,54 @@ class JM extends ComicSource {
     // explore page list
     explore = [
         {
-            // title of the page.
-            // title is used to identify the page, it should be unique
             title: "禁漫天堂",
-
-            /// multiPartPage or multiPageComicList or mixed
-            type: "multiPartPage",
-
-            /**
-             * load function
-             * @param page {number | null} - page number, null for `singlePageWithMultiPart` type
-             * @returns {{}}
-             * - for `multiPartPage` type, return [{title: string, comics: Comic[], viewMore: string?}]
-             * - for `multiPageComicList` type, for each page(1-based), return {comics: Comic[], maxPage: number}
-             * - for `mixed` type, use param `page` as index. for each index(0-based), return {data: [], maxPage: number?}, data is an array contains Comic[] or {title: string, comics: Comic[], viewMore: string?}
-             */
-            load: async (page) => {
-                let res = await this.get(`${this.baseUrl}/promote?page=0`)
-                let result = []
-
-                for(let e of JSON.parse(res)) {
-                    let title = e["title"]
-                    let type = e.type
-                    let id = e.id.toString()
-                    if (type === 'category_id') {
-                        id = e.slug
-                    }
-                    if (['library', 'novels'].includes(type)) {
-                        continue
-                    }
-                    let comics = e.content.map((e) => this.parseComic(e))
-                    result.push({
-                        title: e.title,
-                        comics: comics,
-                        viewMore: `category:${title}@${id}`
-                    })
+            type: "multiPageComicList",
+            optionList: [
+                {
+                    label: "分类",
+                    type: "select",
+                    options: [
+                        "0-最新A漫",
+                        "doujin-同人",
+                        "single-單本",
+                        "short-短篇",
+                        "another-其他類",
+                        "hanman-韓漫",
+                        "meiman-美漫",
+                        "another_cosplay-Cosplay",
+                        "3D-3D",
+                        "禁漫漢化組-禁漫漢化組",
+                    ],
+                },
+                {
+                    label: "排序",
+                    type: "select",
+                    options: [
+                        "mr-最新",
+                        "mv-總排行",
+                        "mv_m-月排行",
+                        "mv_w-周排行",
+                        "mv_t-日排行",
+                        "mp-最多圖片",
+                        "tf-最多喜歡",
+                    ],
+                },
+            ],
+            load: async (page, options) => {
+                options = options || []
+                let cate = options[0] || "0"
+                let sort = options[1] || "mr"
+                let res = await this.get(
+                    `${this.baseUrl}/categories/filter?o=${sort}&c=${encodeURIComponent(cate)}&page=${page}`
+                )
+                let data = JSON.parse(res)
+                let total = data.total
+                let maxPage = Math.ceil(total / 80)
+                let comics = data.content.map((e) => this.parseComic(e))
+                return {
+                    comics: comics,
+                    maxPage: maxPage
                 }
-
-                return result
             },
         }
     ]
