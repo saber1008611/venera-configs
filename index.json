@@ -245,10 +245,17 @@
         "description": "直连可用"
     },
     {
-        "name": "zero搬运网",
+        "name": "Zero搬运网",
         "fileName": "zerobyw33.js",
         "key": "zerobyw33",
-        "version": "1.2.0",
-        "description": "直连可用；可选登录以获得更多内容"
+        "version": "1.2.1",
+        "description": "图片走主站 SNI + Host 头"
+    },
+    {
+        "name": "紳士漫畫",
+        "fileName": "wnacg.js",
+        "key": "wnacg",
+        "version": "1.0.0",
+        "description": "需要 HTTP/3 才能访问（客户端已内置回退）"
     }
 ]

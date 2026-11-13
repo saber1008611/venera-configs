@@ -2,7 +2,7 @@ class ZeroByW33 extends ComicSource {
 
     name = "zero搬运网"
     key = "zerobyw33"
-    version = "1.2.0"
+    version = "1.2.1"
     minAppVersion = "1.6.0"
     url = "https://cdn.jsdelivr.net/gh/meaninglesslyy/venera-configs@main/zerobyw33.js"
 
@@ -224,6 +224,29 @@ class ZeroByW33 extends ComicSource {
         let res = await Network.get(url, this.pageHeaders())
         if (res.status !== 200) throw label + " 请求失败: " + res.status
         return res.body
+    }
+
+    /**
+     * 图片/封面走主站 SNI + `Host` 头指回图床。
+     *
+     * 图床 `tupa.zerobyw33.com` 的 TLS 握手会被直接重置（按 SNI 屏蔽），但主站
+     * `www.zerobyw33.com` 正常；把请求发到主站、用 `Host` 头说明真正要访问的虚拟
+     * 主机即可拿到图片（已实测 200 / image/jpeg）。该做法必须停在 HTTP/1.1：
+     * HTTP/2 用 `:authority` 取代 `Host`，服务端会按主站路由并返回 404。
+     */
+    imageConfig(url) {
+        let u = String(url || "")
+        if (u.indexOf("tupa.") === -1) return null
+        let rest = u
+        let idx = rest.indexOf("://")
+        if (idx !== -1) rest = rest.slice(idx + 3)
+        let slash = rest.indexOf("/")
+        let host = slash === -1 ? rest : rest.slice(0, slash)
+        let path = slash === -1 ? "/" : rest.slice(slash)
+        let headers = this.pageHeaders()
+        headers["Host"] = host
+        headers["Referer"] = this.base + "/"
+        return { url: this.base + path, headers: headers }
     }
 
     // ============ 解析漫画网格 ============
@@ -498,6 +521,10 @@ class ZeroByW33 extends ComicSource {
             }
             return { images }
         },
+
+        // 图床被按 SNI 屏蔽，改用主站 + Host 头（见 imageConfig）
+        onImageLoad: (url) => this.imageConfig(url),
+        onThumbnailLoad: (url) => this.imageConfig(url),
     }
 
     // ============ 设置：手动刷新域名、刷新列表 ============
