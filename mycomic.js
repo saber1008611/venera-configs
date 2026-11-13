@@ -177,7 +177,7 @@ class MyComic extends ComicSource {
 
     key = "mycomic";
 
-    version = "1.1.0";
+    version = "1.1.1";
 
     minAppVersion = "1.4.6";
 
@@ -280,7 +280,7 @@ class MyComic extends ComicSource {
             },
         },
         {
-            title: "最近更新",
+            title: "MYCOMIC-最近更新",
             type: "multiPageComicList",
             load: async (page) => {
                 if (!page) page = 1;

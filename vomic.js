@@ -1,7 +1,7 @@
 class Vomic extends ComicSource {
     name = "Vomic漫画"
     key = "vomic"
-    version = "1.0.0"
+    version = "1.0.1"
     minAppVersion = "1.6.0"
     url = "https://vomicmh.com"
 
@@ -151,7 +151,7 @@ class Vomic extends ComicSource {
 
     explore = [
         {
-            title: "最近更新",
+            title: "Vomic-最近更新",
             type: "multiPageComicList",
             load: async (page) => {
                 const list = await this.apiGet("/c/getUpdateBook", { page: page, limit: 15 })

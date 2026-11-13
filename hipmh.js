@@ -1,7 +1,7 @@
 class Hipmh extends ComicSource {
     name = "嬉皮漫画"
     key = "hipmh"
-    version = "1.0.0"
+    version = "1.0.1"
     minAppVersion = "1.6.0"
     url = "https://m.hipmh.com"
 
@@ -117,7 +117,7 @@ class Hipmh extends ComicSource {
 
     explore = [
         {
-            title: "最近更新",
+            title: "嬉皮漫画-最近更新",
             type: "multiPageComicList",
             load: async (page) => {
                 const data = await this.apiGet(`/v1/mangas?page=${page}`)

@@ -1,7 +1,7 @@
 class Manwa extends ComicSource {
     name = "漫蛙漫画"
     key = "manwa"
-    version = "1.0.0"
+    version = "1.0.1"
     minAppVersion = "1.6.0"
     url = "https://manwadz.cc"
 
@@ -108,7 +108,7 @@ class Manwa extends ComicSource {
 
     explore = [
         {
-            title: "最近更新",
+            title: "漫蛙漫画-最近更新",
             type: "multiPageComicList",
             load: async (page) => {
                 return await this.loadCatePage("comic", page)
