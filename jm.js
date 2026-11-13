@@ -136,15 +136,17 @@ class JM extends ComicSource {
     }
 
     getCoverUrl(id) {
-        return `${this.imageUrl}/media/albums/${id}_3x4.jpg`
+        // imageUrl 是静态字段，实例上的 this.imageUrl 是 undefined；封面和正片
+        // 图片都从这里拼地址，写错的话整站图片都会变成「undefined/media/...」。
+        return `${JM.imageUrl}/media/albums/${id}_3x4.jpg`
     }
 
     getImageUrl(id, imageName) {
-        return `${this.imageUrl}/media/photos/${id}/${imageName}`
+        return `${JM.imageUrl}/media/photos/${id}/${imageName}`
     }
 
     getAvatarUrl(imageName) {
-        return `${this.imageUrl}/media/users/${imageName}`
+        return `${JM.imageUrl}/media/users/${imageName}`
     }
 
     async init() {
