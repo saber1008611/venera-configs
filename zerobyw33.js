@@ -1,13 +1,46 @@
-class ZeroByW33 extends ComicSource {
+﻿class ZeroByW33 extends ComicSource {
 
     name = "zero搬运网"
     key = "zerobyw33"
-    version = "1.2.1"
+    version = "1.2.2"
     minAppVersion = "1.6.0"
     url = "https://cdn.jsdelivr.net/gh/meaninglesslyy/venera-configs@main/zerobyw33.js"
 
-    // 永久发布页（GitHub Pages，永不失效）
+    // 永久发布页（GitHub Pages）。这台机器上根路径 `/` 会被阻断，
+    // 但 `/index.html` 仍可访问，所以下面 ensureDomain 两个都试。
     landingPage = "https://zerobyw.github.io/"
+    landingPageFallback = "https://zerobyw.github.io/index.html"
+
+    // 站点历史上用过的主域名。发布页拿不到时会依次探测这些域名，
+    // 第一个能返回真站内容的就被采用。
+    //
+    // 2026-11 实测（无代理）：从发布页 index.html 里抓到 23 个历史域名，
+    // 逐个请求 `/pc/pc/` 并检查是否含 `/pc/details/` 链接（停放页没有）：
+    //   www.zerobyw33.com  93KB / 24 条  ← 真站，且连续 6 次全部成功（0.27–5.8s）
+    //   www.zerobywmy.com  102KB / 0 条  ← 结构不同，未能确认
+    //   www.zerobyw8.com   停放页（GDPR 广告代码，无漫画）
+    //   其余 ~20 个         连接超时
+    // 所以 33 排最前；停放页不能当候选，会白白骗走一次请求。
+    static candidateDomains = [
+        "www.zerobyw33.com",
+        "www.zerobywmy.com",
+        "www.zerobyw.top",
+        "www.zerobyw24.com",
+        "www.zerobyw603.com",
+        "www.zerobywns.com",
+        "www.zerobywa.com",
+        "www.zerobywb.com",
+        "www.zerobywav.com",
+        "www.zerobywgeat.com",
+        "www.zerobywai.com",
+        "www.zerobywrar.com",
+        "www.zerobyw007.com",
+        "www.zerobyw1060.com",
+        "www.zerobyw5090.com",
+        "www.zerobywgbo2.com",
+        "www.zerobywblac.com",
+    ]
+
     base = "https://www.zerobyw33.com"
     logo = "https://www.zerobyw33.com/template/discuzx5/static/logo-zero-x5-home.svg"
 
@@ -139,52 +172,101 @@ class ZeroByW33 extends ComicSource {
 
     // ============ 域名自动解析 ============
 
-    // 从永久发布页提取最新域名
-    extractDomainFromLanding(body) {
+    // 从永久发布页提取全部候选域名（去重、保序）
+    extractDomainsFromLanding(body) {
         let doc = new HtmlDocument(body)
-        let domain = ""
+        let domains = []
         doc.querySelectorAll("a").forEach(a => {
-            if (domain) return
             let href = a.attributes["href"] || ""
             // 匹配 zerobyw 系列的域名（含 www 或不含）
             let m = href.match(/https?:\/\/((?:www\.)?zerobyw[^\/\s"'<>]+)/)
-            if (m) domain = m[1]
+            if (m && domains.indexOf(m[1]) < 0) domains.push(m[1])
         })
         doc.dispose()
-        return domain
+        return domains
+    }
+
+    // 兼容旧调用点：返回第一个候选域名
+    extractDomainFromLanding(body) {
+        let list = this.extractDomainsFromLanding(body)
+        return list.length > 0 ? list[0] : ""
     }
 
     // 确保域名已解析（缓存 24 小时，惰性执行）
-    async ensureDomain() {
-        if (this._domainResolved) return
+    // 确保域名已解析。
+    //
+    // 冷启动必须**不发任何请求**：默认域名 www.zerobyw33.com 实测可用
+    // （连续 6 次 /pc/pc/ 全部 200、24 条漫画），而逐个探测 17 个备用域名
+    // 在失败时会被重试策略放大——实测一次冷启动的列表要等 523 秒。
+    // 所以这里只在缓存命中时改写 base，真正的换域名交给 fetchBody：
+    // 请求连续失败后传 force=true 进来再探测。
+    async ensureDomain(force) {
+        if (this._domainResolved && !force) return
         this._domainResolved = true
 
-        let cached = this.loadData("resolved_domain")
-        if (cached) {
-            try {
-                let obj = JSON.parse(cached)
-                if (obj.domain && (!obj.t || (Date.now() - obj.t) < 24 * 3600 * 1000)) {
-                    this.base = "https://" + obj.domain
-                    return
-                }
-            } catch (e) {}
+        // 1) 缓存：命中就直接用，省掉一次网络往返。
+        //    被强制重探时跳过——缓存里的那个刚刚才失败。
+        if (!force) {
+            let cached = this.loadData("resolved_domain")
+            if (cached) {
+                try {
+                    let obj = JSON.parse(cached)
+                    if (obj.domain && (!obj.t || (Date.now() - obj.t) < 24 * 3600 * 1000)) {
+                        this.base = "https://" + obj.domain
+                        return
+                    }
+                } catch (e) {}
+            }
+            // 默认域名本身就是已验证可用的，没失败之前不必探测。
+            return
         }
 
-        // 拉取永久发布页获取最新域名
-        try {
-            let res = await Network.get(this.landingPage, this.pageHeaders())
-            if (res.status === 200) {
-                let domain = this.extractDomainFromLanding(res.body)
-                if (domain) {
-                    this.base = "https://" + domain
+        // 2) 强制重探：发布页 → 备用域名。根路径 `/` 在本机被阻断，
+        //    `/index.html` 仍可访问，所以两个都试。
+        let landingDomains = []
+        for (let page of [this.landingPage, this.landingPageFallback]) {
+            try {
+                let res = await Network.get(page, this.pageHeaders())
+                if (res.status === 200) {
+                    landingDomains = this.extractDomainsFromLanding(res.body)
+                    if (landingDomains.length > 0) break
+                }
+            } catch (e) {
+                // 这个入口拿不到就试下一个
+            }
+        }
+
+        // 3) 按「已验证可用的域名 → 发布页最新域名 → 其余历史域名」的顺序探测。
+        //
+        //    必须校验内容而不能只看状态码：域名过期后会被停放商接管，
+        //    www.zerobyw8.com 就是这种——HTTP 200 但页面只有 GDPR 广告代码。
+        //    真站的列表页一定带 `/pc/details/` 链接。
+        //
+        //    探测数量要收敛：每个死域名都要付一次连接超时（8s），加上自动重试
+        //    放大 4 倍，探 17 个就是好几分钟。只探「发布页给的域名 + 前 4 个备用」。
+        let order = []
+        for (let d of landingDomains) order.push(d)
+        for (let d of ZeroByW33.candidateDomains) {
+            if (order.indexOf(d) < 0) order.push(d)
+            if (order.length >= 8) break
+        }
+
+        for (let host of order) {
+            try {
+                let probe = await Network.get(
+                    "https://" + host + "/pc/pc/", this.pageHeaders()
+                )
+                if (probe.status === 200 && probe.body.indexOf("/pc/details/") >= 0) {
+                    this.base = "https://" + host
                     this.saveData("resolved_domain", JSON.stringify({
                         t: Date.now(),
-                        domain: domain
+                        domain: host
                     }))
+                    return
                 }
+            } catch (e) {
+                // 继续试下一个
             }
-        } catch (e) {
-            // 发布页也挂了就用默认域名
         }
     }
 
@@ -237,7 +319,8 @@ class ZeroByW33 extends ComicSource {
             }
             if (!retryable) break
             if (attempt === 1) {
-                await this.ensureDomain()
+                // 换域名：force=true 让 ensureDomain 跳过缓存去重新探测。
+                await this.ensureDomain(true)
                 currentUrl = this.base + url.slice(url.indexOf("/", 8))
             }
         }

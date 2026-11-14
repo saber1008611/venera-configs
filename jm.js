@@ -1,4 +1,4 @@
-class JM extends ComicSource {
+﻿class JM extends ComicSource {
     // Note: The fields which are marked as [Optional] should be removed if not used
 
     // name of the source
@@ -7,7 +7,7 @@ class JM extends ComicSource {
     // unique id of the source
     key = "jm"
 
-    version = "1.4.2"
+    version = "1.4.3"
 
     minAppVersion = "1.5.0"
 
@@ -44,7 +44,10 @@ class JM extends ComicSource {
     static ua = "Mozilla/5.0 (Linux; Android 10; K; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/130.0.0.0 Mobile Safari/537.36"
 
     // 单次请求超时（毫秒）。线路半死不活时不要让界面卡几十秒。
-    static requestTimeoutMs = 12000
+    // 单次线路请求的上限（毫秒）。不能太小：TCP 被静默丢弃时，客户端要先等
+    // connectTimeout（5s）失败才会回退到 HTTP/3，QUIC 握手实测 0.5–5s，两者相加
+    // 最坏 10s。原来设 12s 时余量不足，回退还没完成 JS 侧就先报"请求超时"。
+    static requestTimeoutMs = 20000
 
     // 某台线路失败后，冷却多久不再尝试（毫秒）。
     static hostCooldownMs = 5 * 60 * 1000
