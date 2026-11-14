@@ -4,7 +4,7 @@ class CopyManga extends ComicSource {
 
     key = "copy_manga"
 
-    version = "1.5.0"
+    version = "1.6.0"
 
     minAppVersion = "1.6.0"
 
@@ -69,6 +69,115 @@ class CopyManga extends ComicSource {
         }
     }
 
+    /// 熱辣漫畫的请求头：copy20 实测用的是「网页浏览器」指纹，
+    /// 与我们发给拷贝官方 App 的头完全不同（Origin/Version/Webp/platform 都有区别）。
+    get hotHeaders() {
+        return {
+            "Accept": "application/json",
+            "Accept-Language": "en-US,en;q=0.9,zh-TW;q=0.8,zh;q=0.7",
+            "Origin": "https://m.relamanhua.org",
+            "Version": "2025.11.21",
+            "Region": "0",
+            "Webp": "1",
+            "platform": "1",
+            "sec-fetch-dest": "document",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-user": "?1",
+            "upgrade-insecure-requests": "1",
+            "User-Agent": CopyManga.desktopUserAgent,
+        }
+    }
+
+    /// 阅读线路（copy / hot）的请求顺序
+    readRouteOrder() {
+        let setting = 'auto'
+        try {
+            setting = this.loadSetting('read_route') || 'auto'
+        } catch (e) {
+            setting = 'auto'
+        }
+        if (setting === 'copy' || setting === 'hot') {
+            return [setting]
+        }
+        let preferred = this.loadData('_read_route') || 'copy'
+        return preferred === 'hot' ? ['hot', 'copy'] : ['copy', 'hot']
+    }
+
+    isKindBlocked(kind) {
+        let at = this.loadData(`_blocked_${kind}`)
+        if (!at) return false
+        return (Date.now() - at) < CopyManga.blockCooldownMs
+    }
+
+    markKindBlocked(kind) {
+        this.saveData(`_blocked_${kind}`, Date.now())
+        console.log(`[copy_manga] ${kind} 线路被拷贝防盗版机制限制，30 分钟内不再尝试`)
+    }
+
+    /**
+     * 读取类请求（详情 / 章节表 / 章节内容）。
+     *
+     * 拷贝漫画会把「破解版 APP」的这三类接口在整组域名上一起封成 210，
+     * 此时换域名、换请求头都没用，只能换站点：熱辣漫畫与拷贝共用同一套后端
+     * 和漫画库（path_word、uuid 通用），它的 API 域名不受这个限制。
+     *
+     * buildPath(kind) 返回拼在 `https://${host}` 后面的路径。
+     */
+    async fetchRead(buildPath) {
+        let kinds = this.readRouteOrder()
+        let lastError = null
+        for (let kind of kinds) {
+            if (this.isKindBlocked(kind)) continue
+            let hosts = kind === 'hot'
+                ? CopyManga.hotApiHosts
+                : [this.apiHost].concat(CopyManga.apiHosts)
+            let seenHost = {}
+            for (let host of hosts) {
+                if (seenHost[host]) continue
+                seenHost[host] = true
+                let res
+                try {
+                    res = await Network.get(
+                        `https://${host}${buildPath(kind)}`,
+                        kind === 'hot' ? this.hotHeaders : this.headers
+                    )
+                } catch (e) {
+                    let msg = e && e.message ? e.message : String(e)
+                    if (msg.indexOf('210') >= 0) {
+                        this.markKindBlocked(kind)
+                        lastError = '拷贝漫画触发了防盗版机制，请稍后再试'
+                        break
+                    }
+                    lastError = `${kind}/${host}: ${msg}`
+                    this.afterRequest()
+                    continue
+                }
+                this.afterRequest()
+                if (CopyManga.isOkResponse(res)) {
+                    if ((this.loadData('_read_route') || 'copy') !== kind) {
+                        this.saveData('_read_route', kind)
+                        console.log(`[copy_manga] 阅读线路切换到 ${kind} (${host})`)
+                    }
+                    return res
+                }
+                let body = typeof res.body === 'string' ? res.body : ''
+                if (res.status === 210 && body.indexOf('破解') >= 0) {
+                    // 整组域名一起封，继续换域名只是浪费时间
+                    this.markKindBlocked(kind)
+                    lastError = kind === 'hot'
+                        ? '熱辣漫畫也被限制了，请稍后再试'
+                        : '拷贝漫画触发了防盗版机制，请稍后再试'
+                    break
+                }
+                lastError = `${kind}/${host}: HTTP ${res.status} ${body.slice(0, 60)}`
+                // 4xx 与该域名无关（漫画不存在/接口变更），换站点比换域名有意义
+                if (res.status >= 400 && res.status < 500) break
+            }
+        }
+        throw lastError || '所有线路均不可用'
+    }
+
     // static defaultCopyVersion = "3.0.6"
 
     // static defaultCopyPlatform = "2"
@@ -80,12 +189,29 @@ class CopyManga extends ComicSource {
     // 直连（无代理）实测可用的 API 域名池，按响应速度排序。
     // 首个为默认域名；请求失败或返回非正常 JSON 时会自动切换到下一个并记住结果。
     static apiHosts = [
+        'api.mangacopy.com',
         'api.copy-manga.com',
         'api.copy4000.com',
-        'api.copy202601.com',
         'api.copy5000.com',
+        'api.copy202601.com',
         'api.copy2000.online',
     ]
+
+    // 熱辣漫畫的 API 域名：与拷贝同一套后端和漫画库（path_word/uuid 通用），
+    // 但不受拷贝「破解版 APP」防盗版限制。只用来读取详情/章节/章节内容。
+    static hotApiHosts = [
+        'mapi.hotmangasd.com',
+        'mapi.hotmangasf.com',
+        'mapi.hotmangasg.com',
+        'mapi.fgjfghkk.club',
+        'mapi.elfgjfghkk.club',
+        'mapi.fgjfghkkcenter.club',
+    ]
+
+    // 被防盗版机制限制后，多久之内不再尝试该线路
+    static blockCooldownMs = 30 * 60 * 1000
+
+    static desktopUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
     static defaultApiUrl = CopyManga.apiHosts[0]
 
@@ -772,40 +898,20 @@ class CopyManga extends ComicSource {
             let getChapters = async (id, groups) => {
                 let fetchSingle = async (id, path) => {
                     let reqId = await this.getReqID();
-                    let res = await this.networkGet(
-                        `${this.apiUrl}/api/v3/comic/${id}/group/${path}/chapters?limit=100&offset=0&in_mainland=true&request_id=${reqId}`,
-                        this.headers
-                    );
-                    if (res.status !== 200) {
-                        throw `Invalid status code: ${res.status}`;
-                    }
-                    let data = JSON.parse(res.body);
                     let eps = new Map();
-                    data.results.list.forEach((e) => {
-                        let title = e.name;
-                        let id = e.uuid;
-                        eps.set(id, title);
-                    });
-                    let maxChapter = data.results.total;
-                    if (maxChapter > 100) {
-                        let offset = 100;
-                        while (offset < maxChapter) {
-                            res = await this.networkGet(
-                                `${this.apiUrl}/api/v3/comic/${id}/group/${path}/chapters?limit=100&offset=${offset}`,
-                                this.headers
-                            );
-                            if (res.status !== 200) {
-                                throw `Invalid status code: ${res.status}`;
-                            }
-                            data = JSON.parse(res.body);
-                            data.results.list.forEach((e) => {
-                                let title = e.name;
-                                let id = e.uuid;
-                                eps.set(id, title)
-                            });
-                            offset += 100;
-                        }
-                    }
+                    let offset = 0;
+                    let total = 0;
+                    do {
+                        let res = await this.fetchRead((kind) => kind === 'hot'
+                            ? `/api/v3/comic/${id}/group/${path}/chapters?limit=100&offset=${offset}&_update=true`
+                            : `/api/v3/comic/${id}/group/${path}/chapters?limit=100&offset=${offset}&in_mainland=true&request_id=${reqId}`);
+                        let data = JSON.parse(res.body);
+                        data.results.list.forEach((e) => {
+                            eps.set(e.uuid, e.name);
+                        });
+                        total = data.results.total || 0;
+                        offset += 100;
+                    } while (offset < total);
                     return eps;
                 };
                 let keys = Object.keys(groups);
@@ -839,24 +945,22 @@ class CopyManga extends ComicSource {
             }
 
             let getFavoriteStatus = async (id) => {
-                let res = await this.networkGet(`${this.apiUrl}/api/v3/comic2/${id}/query`, this.headers);
-                if (res.status !== 200) {
-                    throw `Invalid status code: ${res.status}`;
+                // 收藏状态只有拷贝域名有（熱辣没有账号体系），失败不能影响阅读
+                try {
+                    let res = await this.networkGet(`${this.apiUrl}/api/v3/comic2/${id}/query`, this.headers);
+                    if (res.status !== 200) return false;
+                    return JSON.parse(res.body).results.collect != null;
+                } catch (e) {
+                    return false;
                 }
-                return JSON.parse(res.body).results.collect != null;
             }
             let reqId = await this.getReqID();
             let results = await Promise.all([
-                this.networkGet(
-                    `${this.apiUrl}/api/v3/comic2/${id}?in_mainland=true&request_id=${reqId}&platform=3`,
-                    this.headers
-                ),
+                this.fetchRead((kind) => kind === 'hot'
+                    ? `/api/v3/comic2/${id}`
+                    : `/api/v3/comic2/${id}?in_mainland=true&request_id=${reqId}&platform=3`),
                 getFavoriteStatus.bind(this)(id)
             ])
-
-            if (results[0].status !== 200) {
-                throw `Invalid status code: ${results[0].status}`;
-            }
 
             let data = JSON.parse(results[0].body).results;
             let comicData = data.comic;
@@ -892,80 +996,36 @@ class CopyManga extends ComicSource {
             }
         },
         loadEp: async (comicId, epId) => {
-            let attempt = 0;
-            const maxAttempts = 5;
-            let res;
-            let data;
+            let reqId = await this.getReqID();
+            // 拷贝用 /chapter2/，熱辣用 /chapter/（两者后端相同，仅路由不同）
+            let res = await this.fetchRead((kind) => kind === 'hot'
+                ? `/api/v3/comic/${comicId}/chapter/${epId}`
+                : `/api/v3/comic/${comicId}/chapter2/${epId}?in_mainland=true&request_id=${reqId}`);
 
-            while (attempt < maxAttempts) {
-                try {
-                    let reqId = await this.getReqID();
-                    res = await this.networkGet(
-                        `${this.apiUrl}/api/v3/comic/${comicId}/chapter2/${epId}?in_mainland=true&request_id=${reqId}`,
-                        {
-                            ...this.headers
-                        }
-                    );
+            let data = JSON.parse(res.body);
+            let imagesUrls = data.results.chapter.contents.map((e) => e.url);
+            // 拷贝会给排序数组 words；熱辣返回 null，此时图片本来就是顺序的
+            let orders = data.results.chapter.words;
 
-                    if (res.status === 210) {
-                        // 210 indicates too frequent access, extract wait time
-                        let waitTime = 40000; // Default wait time 40s
-                        try {
-                            let responseBody = JSON.parse(res.body);
-                            if (
-                                responseBody.message &&
-                                responseBody.message.includes("Expected available in")
-                            ) {
-                                let match = responseBody.message.match(/(\d+)\s*seconds/);
-                                if (match && match[1]) {
-                                    waitTime = parseInt(match[1]) * 1000;
-                                }
-                            }
-                        } catch (e) {
-                            console.log(
-                                "Unable to parse wait time, using default wait time 40s"
-                            );
-                        }
-                        console.log(`Chapter${epId} access too frequent, waiting ${waitTime / 1000}s`);
-                        await new Promise((resolve) => setTimeout(resolve, waitTime));
-                        throw "Retry";
-                    }
+            // 拷贝的图片地址带 c<quality>x，按用户设置的质量改写；熱辣的 h<quality>x 保持原样
+            let hdImagesUrls = imagesUrls.map((url) =>
+                url.replace(/([./])c\d+x\.[a-zA-Z]+$/, `$1c${this.imageQuality}x.webp`)
+            )
 
-                    if (res.status !== 200) {
-                        throw `Invalid status code: ${res.status}`;
-                    }
-
-                    data = JSON.parse(res.body);
-                    // console.log(data.results.chapter);
-                    // Handle image link sorting
-                    let imagesUrls = data.results.chapter.contents.map((e) => e.url);
-                    let orders = data.results.chapter.words;
-
-                    // Replace origin images urls to selected quality images urls
-                    let hdImagesUrls = imagesUrls.map((url) =>
-                        url.replace(/([./])c\d+x\.[a-zA-Z]+$/, `$1c${this.imageQuality}x.webp`)
-                    )
-
-                    let images = new Array(hdImagesUrls.length).fill(""); // Initialize an array with the same length as imagesUrls
-
-                    // Arrange images according to orders
-                    for (let i = 0; i < hdImagesUrls.length; i++) {
-                        images[orders[i]] = hdImagesUrls[i];
-                    }
-
-                    return {
-                        images: images,
-                    };
-                } catch (error) {
-                    if (error !== "Retry") {
-                        throw error;
-                    }
-                    attempt++;
-                    if (attempt >= maxAttempts) {
-                        throw error;
-                    }
-                }
+            if (!Array.isArray(orders) || orders.length !== hdImagesUrls.length) {
+                return { images: hdImagesUrls };
             }
+
+            let images = new Array(hdImagesUrls.length).fill(""); // Initialize an array with the same length as imagesUrls
+
+            // Arrange images according to orders
+            for (let i = 0; i < hdImagesUrls.length; i++) {
+                images[orders[i]] = hdImagesUrls[i];
+            }
+
+            return {
+                images: images,
+            };
         },
         loadComments: async (comicId, subId, page, replyTo) => {
             let url = `${this.apiUrl}/api/v3/comments?comic_id=${subId}&limit=20&offset=${(page - 1) * 20}`;
@@ -1110,6 +1170,25 @@ class CopyManga extends ComicSource {
     }
 
     settings = {
+        read_route: {
+            title: "阅读线路",
+            type: "select",
+            options: [
+                {
+                    value: 'auto',
+                    text: '自动（拷贝触发防盗版时切换到热辣漫画）'
+                },
+                {
+                    value: 'copy',
+                    text: '只用拷贝漫画'
+                },
+                {
+                    value: 'hot',
+                    text: '只用热辣漫画'
+                }
+            ],
+            default: 'auto',
+        },
         favorites_ordering: {
             title: "收藏排序方式",
             type: "select",

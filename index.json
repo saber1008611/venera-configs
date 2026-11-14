@@ -4,8 +4,8 @@
     "fileName": "copy_manga.js",
     "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/copy_manga.js",
     "key": "copy_manga",
-    "version": "1.5.0",
-    "description": "自动从可用 API 域名池中挑选最快域名；发现页支持题材 / 排序 / 类型筛选"
+    "version": "1.6.0",
+    "description": "拷贝会对破解版 APP 把详情/章节/看图整组封成 210，此时自动切到同库的热辣漫画 API，列表搜索收藏仍走拷贝；另有域名池自动切换"
   },
   {
     "name": "禁漫天堂",
