@@ -60,8 +60,8 @@
     "fileName": "vomicmh.js",
     "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/vomicmh.js",
     "key": "vomicmh",
-    "version": "1.1.0",
-    "description": "移植 Mihon 的 zh.vomicmh v1.4.4（Apache-2.0）；直连国内 API http://43.143.245.32/pics，无签名；章节内容需要登录后读取"
+    "version": "1.1.1",
+    "description": "移植 Mihon 的 zh.vomicmh v1.4.4（Apache-2.0）；直连国内 API http://43.143.245.32/pics，无签名；登录 token 取自响应顶层；章节内容需要登录后读取"
   },
   {
     "name": "哔咔漫画",

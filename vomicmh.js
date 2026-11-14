@@ -13,7 +13,7 @@
 class VomicPlus extends ComicSource {
     name = "vomic漫+"
     key = "vomicmh"
-    version = "1.1.0"
+    version = "1.1.1"
     minAppVersion = "1.6.0"
     url = "https://vomicmh.com"
 
@@ -353,7 +353,9 @@ class VomicPlus extends ComicSource {
     }
 
     account = {
-        // TokenProvider.V1.getToken：FormBody identity/password，无签名、无 JSON body
+        // TokenProvider.V1.getToken：FormBody identity/password，无签名、无 JSON body。
+        // 响应形如 {"code":200,"data":{...用户信息...},"token":"<jwt>","ttl":...}，
+        // token 在顶层而不是 data 里（Mihon 的 LoginResult 也是把 token 当独立字段）。
         login: async (account, pwd) => {
             let headers = this.apiHeaders(false)
             headers["content-type"] = "application/x-www-form-urlencoded"
@@ -363,9 +365,16 @@ class VomicPlus extends ComicSource {
                 throw `登录失败: ${res.status}`
             }
             let json = JSON.parse(res.body)
-            let token = (json["data"] || {})["token"]
-            if (!token) {
-                throw json["message"] || "登录失败"
+            if (json["code"] !== undefined && json["code"] !== 200) {
+                throw json["message"] || `登录失败: ${json["code"]}`
+            }
+            // 顶层优先，兼容旧接口把 token 放在 data 里的情况。
+            let token = json["token"]
+            if (!token || String(token).length === 0) {
+                token = (json["data"] || {})["token"]
+            }
+            if (!token || String(token).length === 0) {
+                throw json["message"] || "登录失败：服务器未返回 token"
             }
             this.saveData("token", token)
             return "ok"
