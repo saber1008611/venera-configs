@@ -1,4 +1,4 @@
-﻿class JM extends ComicSource {
+class JM extends ComicSource {
     // Note: The fields which are marked as [Optional] should be removed if not used
 
     // name of the source
@@ -7,7 +7,7 @@
     // unique id of the source
     key = "jm"
 
-    version = "1.4.3"
+    version = "1.4.5"
 
     minAppVersion = "1.5.0"
 
@@ -40,6 +40,10 @@
     ];
 
     static imageUrl = "https://cdn-msp.jmapinodeudzn.net"
+
+    // 默认走「自动」：shunt 0 是服务端自己的自动档。上游默认值 1 固定指向
+    // tencent 那台，实测是所有线路里最慢的一档（165KB/s，快的有 400KB/s）。
+    static defaultImgStream = "0"
 
     static ua = "Mozilla/5.0 (Linux; Android 10; K; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/130.0.0.0 Mobile Safari/537.36"
 
@@ -84,6 +88,35 @@
 
     overwriteImgUrl(url) {
         if (url.length != 0) JM.imageUrl = url
+    }
+
+    /// 把图片地址里旧的图片线路改写成当前选中的线路。
+    ///
+    /// 服务端每次下发的 host 会轮换，而已经写进阅读记录/缓存的图片地址会一直
+    /// 指向当时那台（可能是最慢的 tencent）。切换到更快的线路后，这些旧地址
+    /// 也应该跟着换，否则老章节还是慢。
+    rewriteImgHost(url) {
+        if (typeof url !== 'string') return url
+        let m = /^https?:\/\/[^\/]+/.exec(url)
+        if (!m) return url
+        let origin = m[0]
+        if (origin === JM.imageUrl) return url
+        let bare = origin.replace(/^https?:\/\//, '')
+        let known = [
+            "jmdanjonproxy.xyz",
+            "jmdanjonproxy.vip",
+            "jmdanjonproxy.top",
+            "jmapiproxy1.cc",
+            "jmapiproxy2.cc",
+            "jmapiproxy3.cc",
+            "jmapinodeudzn.net",
+        ]
+        for (let suffix of known) {
+            if (bare.endsWith(suffix)) {
+                return JM.imageUrl + url.substring(origin.length)
+            }
+        }
+        return url
     }
 
     isNum(str) {
@@ -138,10 +171,108 @@
         }
     }
 
+    /// 测速样本大小（字节）。每台线路只抓头 256KB，够看出快慢了。
+    static imgProbeBytes = 256 * 1024
+
+    /// 「自动」测速结果缓存多久（毫秒）。服务端线路会轮换，但不必每章都测。
+    static imgHostCacheTtlMs = 6 * 60 * 60 * 1000
+
+    /// 服务端当前可能下发的图片线路：问 shunt 0..4，去重后加上当前线路。
+    async candidateImgHosts() {
+        let hosts = [JM.imageUrl]
+        let list = await Promise.all(
+            [0, 1, 2, 3, 4].map(async (shunt) => {
+                try {
+                    let res = JSON.parse(
+                        await this.get(
+                            `${this.baseUrl}/setting?app_img_shunt=${shunt}&express=`
+                        )
+                    )
+                    return res["img_host"] ?? null
+                } catch (e) {
+                    return null
+                }
+            })
+        )
+        for (let host of list) {
+            if (host && hosts.indexOf(host) < 0) hosts.push(host)
+        }
+        return hosts
+    }
+
+    /// 并发下载同一张图的头部，取速度最快的一台；全都失败返回 null。
+    async fastestImgHost(hosts, epId, sampleName) {
+        let path = `/media/photos/${epId}/${sampleName}`
+        let headers = this.getImgHeaders()
+        headers["Range"] = `bytes=0-${JM.imgProbeBytes - 1}`
+        // 测速不是真的要看图，别让网络缓存把数据留下来。
+        headers["cache-time"] = "no"
+        let results = await Promise.all(
+            hosts.map(async (host) => {
+                let start = Date.now()
+                try {
+                    let res = await Network.fetchBytes(
+                        "GET", host + path, headers, undefined,
+                        { allowHttp3Fallback: true }
+                    )
+                    let size = res.body ? res.body.byteLength : 0
+                    let ms = Date.now() - start
+                    if (!size) return null
+                    return { host: host, speed: size / Math.max(ms, 1) }
+                } catch (e) {
+                    return null
+                }
+            })
+        )
+        let best = null
+        let bestSpeed = 0
+        for (let r of results) {
+            if (r && r.speed > bestSpeed) {
+                bestSpeed = r.speed
+                best = r.host
+            }
+        }
+        return best
+    }
+
+    /**
+     * 「自动」图片线路：拿本话第一张图做样本，量各线路实际速度选最快的一台。
+     *
+     * 不能固定用某个 shunt：同一个编号每次下发的主机都不一样（shunt 0 有时给
+     * cdn-msp.jmdanjonproxy.xyz，有时给最慢的 jmapiproxy3.cc），只能实测。
+     * 结果缓存 6 小时，避免每章都测。
+     */
+    async autoPickImgHost(epId, images) {
+        if (!images || images.length === 0) return
+        let cached = this.loadData('_img_host')
+        let at = Number(this.loadData('_img_host_at') ?? 0)
+        if (typeof cached === 'string' && cached.length !== 0 && at !== 0 &&
+            Date.now() - at < JM.imgHostCacheTtlMs) {
+            this.overwriteImgUrl(cached)
+            return
+        }
+        try {
+            let hosts = await this.candidateImgHosts()
+            let best = await this.fastestImgHost(hosts, epId, images[0])
+            if (best === null) return
+            this.overwriteImgUrl(best)
+            this.saveData('_img_host', best)
+            this.saveData('_img_host_at', Date.now())
+        } catch (e) {
+            // 测速失败就继续用当前线路，不影响阅读
+        }
+    }
+
     getCoverUrl(id) {
         // imageUrl 是静态字段，实例上的 this.imageUrl 是 undefined；封面和正片
         // 图片都从这里拼地址，写错的话整站图片都会变成「undefined/media/...」。
         return `${JM.imageUrl}/media/albums/${id}_3x4.jpg`
+    }
+
+    /// 当前图片线路。供 `comic` 里的钩子使用：那些箭头函数在字段初始化时创建，
+    /// 作用域里拿不到类名 JM（实测 `typeof JM === "undefined"`），只能走实例方法。
+    currentImgUrl() {
+        return JM.imageUrl
     }
 
     getImageUrl(id, imageName) {
@@ -216,21 +347,37 @@
     }
 
     /**
+     * 选择图片线路。
+     *
+     * 用本机 HTTP 栈（AppDio + rhttp + HTTP/3 回退）对同一张图实测各线路下载
+     * 速度（2026-11，Windows，两轮，单图 556KB）：
+     *   cdn-msp12.jmdanjonproxy.xyz     281 / 401 KB/s
+     *   cdn-msp3.jmdanjonproxy.vip      339 / 265 KB/s
+     *   cdn-msp.jmdanjonproxy.xyz       275 / 276 KB/s
+     *   cdn-msp.jmapiproxy1.cc          255 / 134 KB/s
+     *   cdn-msp.jmapinodeudzn.net       202 / 172 KB/s
+     *   tencent.jmdanjonproxy.xyz       163 / 165 KB/s  ← 上游默认值 1 就是这台
+     *   cdn-msp2.jmapiproxy3.cc          78 / 133 KB/s
+     * 服务端每次下发的 host 都会轮换，编号和 host 不能硬编码绑定，所以「自动」
+     * 直接用官方的 shunt 0（服务端自己的自动档）——实测它下发的都是上面较快
+     * 的几台；而默认值 1 固定是 tencent 那台最慢的。
      *
      * @param showMessage {boolean}
      */
     async refreshImgUrl(showMessage) {
-        let index = this.loadSetting('imageStream')
+        let choice = this.loadSetting('imageStream')
+        if (choice === undefined || choice === null || choice === '') {
+            choice = JM.defaultImgStream
+        }
         let res = await this.get(
-            `${this.baseUrl}/setting?app_img_shunt=${index}&express=`
+            `${this.baseUrl}/setting?app_img_shunt=${choice}&express=`
         )
         let setting = JSON.parse(res)
-        if (setting["img_host"]) {
-            if (showMessage) {
-                UI.showMessage(`Image Stream ${index}:\n${setting["img_host"]}`)
-            }
-            this.overwriteImgUrl(setting["img_host"])
-        }
+        let host = setting["img_host"] ?? null
+        if (host === null || host.length === 0) return
+        this.saveData('_img_host', host)
+        if (showMessage) UI.showMessage(`图片线路:\n${host}`)
+        this.overwriteImgUrl(host)
     }
 
     /**
@@ -937,6 +1084,9 @@
         loadEp: async (comicId, epId) => {
             let res = await this.get(`${this.baseUrl}/chapter?id=${epId}`);
             let data = JSON.parse(res)
+            if (this.loadSetting('imageStream') === '0') {
+                await this.autoPickImgHost(epId, data.images)
+            }
             let images = data.images.map((e) => this.getImageUrl(epId, e))
             return {
                 images: images
@@ -950,11 +1100,13 @@
          * @returns {{} | Promise<{}>}
          */
         onImageLoad: (url, comicId, epId) => {
+            const imageKey = url
             // Legacy keys recorded by the old `this.imageUrl` bug (see
             // onThumbnailLoad) cannot be fetched; repair before parsing.
             if (typeof url === 'string' && url.startsWith('undefined/media/')) {
-                url = JM.imageUrl + url.substring('undefined'.length)
+                url = this.currentImgUrl() + url.substring('undefined'.length)
             }
+            url = this.rewriteImgHost(url)
             const scrambleId = 220980
             let pictureName = "";
             for (let i = url.length - 1; i >= 0; i--) {
@@ -987,10 +1139,12 @@
                 num = remainder * 2 + 2
             }
             if (num <= 1) {
-                return {}
+                return url === imageKey ? {} : { url: url }
             }
             return {
                 headers: this.getImgHeaders(),
+                // 旧记录里的图片地址可能还是慢线路，这里给出改写后的地址。
+                ...(url === imageKey ? {} : { url: url }),
                 // gif 图片不需要修改
                 modifyImage: url.endsWith(".gif") ? null : `
                     let modifyImage = (image) => {
@@ -1033,7 +1187,10 @@
             // refresh. Repair them on the way out instead of asking the user to
             // clear their history.
             if (typeof url === 'string' && url.startsWith('undefined/media/albums/')) {
-                url = JM.imageUrl + url.substring('undefined'.length)
+                url = this.currentImgUrl() + url.substring('undefined'.length)
+            }
+            if (typeof url === 'string' && url.length !== 0) {
+                url = this.rewriteImgHost(url)
             }
             return {
                 headers: this.getImgHeaders(),
@@ -1149,23 +1306,31 @@
             default: "1",
         },
         imageStream: {
-            title: "Image Stream",
+            title: "图片线路",
             type: "select",
             options: [
                 {
+                    value: '0',
+                    text: '自动（推荐，服务端选最快的一台）',
+                },
+                {
                     value: '1',
+                    text: '图源1',
                 },
                 {
                     value: '2',
+                    text: '图源2',
                 },
                 {
                     value: '3',
+                    text: '图源3',
                 },
                 {
                     value: '4',
+                    text: '图源4',
                 },
             ],
-            default: "1",
+            default: "0",
         },
         favoriteOrder: {
             title: "Favorite Order",
