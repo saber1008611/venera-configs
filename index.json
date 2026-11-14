@@ -12,8 +12,8 @@
     "fileName": "jm.js",
     "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/jm.js",
     "key": "jm",
-    "version": "1.4.1",
-    "description": "自动从官方加密域名表获取最新线路；失败线路冷却 5 分钟后再试"
+    "version": "1.4.2",
+    "description": "自动从官方加密域名表获取最新线路；失败线路冷却 5 分钟后再试；旧版遗留的 undefined 封面 key 自动修复"
   },
   {
     "name": "热辣漫画",

@@ -7,7 +7,7 @@ class JM extends ComicSource {
     // unique id of the source
     key = "jm"
 
-    version = "1.4.1"
+    version = "1.4.2"
 
     minAppVersion = "1.5.0"
 
@@ -947,6 +947,11 @@ class JM extends ComicSource {
          * @returns {{} | Promise<{}>}
          */
         onImageLoad: (url, comicId, epId) => {
+            // Legacy keys recorded by the old `this.imageUrl` bug (see
+            // onThumbnailLoad) cannot be fetched; repair before parsing.
+            if (typeof url === 'string' && url.startsWith('undefined/media/')) {
+                url = JM.imageUrl + url.substring('undefined'.length)
+            }
             const scrambleId = 220980
             let pictureName = "";
             for (let i = url.length - 1; i >= 0; i--) {
@@ -1017,8 +1022,19 @@ class JM extends ComicSource {
          * @returns {{}}
          */
         onThumbnailLoad: (url) => {
+            // Older versions of this source built the cover with
+            // `this.imageUrl` (undefined on an instance) instead of
+            // `JM.imageUrl`, so history entries recorded before that fix still
+            // hold "undefined/media/albums/<id>_3x4.jpg". Those keys cannot be
+            // fetched, and the reader logs one "skipped" line per row on every
+            // refresh. Repair them on the way out instead of asking the user to
+            // clear their history.
+            if (typeof url === 'string' && url.startsWith('undefined/media/albums/')) {
+                url = JM.imageUrl + url.substring('undefined'.length)
+            }
             return {
-                headers: this.getImgHeaders()
+                headers: this.getImgHeaders(),
+                ...(url !== undefined ? { url: url } : {}),
             }
         },
         /**

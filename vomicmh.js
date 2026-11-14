@@ -1,25 +1,26 @@
 /**
  * vomic漫+（vomicmh.com）
  *
- * 移植自 Mihon 扩展 zh.vomic（Apache-2.0），保留原签名算法、筛选语义与接口路径，
- * 改用 Venera 的 JS 接口实现。
+ * 移植自 Mihon 扩展 zh.vomicmh v1.4.4（Apache-2.0，反编译 G:\code\venera\_probe\vomicmh_src）。
+ * 使用 Mihon 扩展同款 API：http://43.143.245.32/pics（腾讯云国内直连可达），
+ * 无 t/s 签名（旧版 apk 里根本没有 SignInterceptor，签名版 pics_new 接口已不可用）。
  *
- * 说明：章节图片接口需要登录态（Bearer token），未登录时只能浏览列表与详情。
+ * 请求头（HeadersInterceptor）：name=pics, platform=android, showsuccess=false,
+ * showtoast=false, version=1.0.10；登录后带 Authorization: Bearer <token>。
+ * 图片 CDN cdm.vomicer.com 需要 user-agent: Dart/3.7 (dart:io)。
  */
 
 class VomicPlus extends ComicSource {
     name = "vomic漫+"
     key = "vomicmh"
-    version = "1.0.0"
+    version = "1.1.0"
     minAppVersion = "1.6.0"
     url = "https://vomicmh.com"
 
-    static salt = "hhhasda"
-    static initialHash = 0x9e3779b9
+    static apiUrl = "http://43.143.245.32/pics"
 
-    static mangaLimit = 20
+    static mangaLimit = 12
     static searchLimit = 10
-    static updateLimit = 15
 
     static categories = [
         ["4", "冒险"], ["5", "搞笑"], ["6", "动作"], ["7", "科幻"], ["8", "爱情"],
@@ -32,79 +33,25 @@ class VomicPlus extends ComicSource {
         ["41", "重生"], ["43", "美食"],
     ]
 
-    static rotl(value, bits) {
-        return ((value << bits) | (value >>> (32 - bits))) >>> 0
-    }
-
-    /// 与原扩展的 SignInterceptor.hash 等价（32 位整数运算）。
-    static signHash(data, timestamp) {
-        let key = VomicPlus.salt
-        let keyLength = key.length
-        let value = VomicPlus.initialHash
-
-        for (let i = 0; i < keyLength; i++) {
-            value = VomicPlus.rotl(value ^ (key.charCodeAt(i) & 0xff), 7)
-        }
-
-        let text = data + timestamp + key
-        for (let i = 0; i < text.length; i++) {
-            let k = key.charCodeAt(i % keyLength) & 0xff
-            let mix = i % 2 === 0 ? k * 8 : k >> 1
-            value = (VomicPlus.rotl(value ^ (text.charCodeAt(i) & 0xff), 5) ^ mix) >>> 0
-        }
-
-        for (let i = 0; i < keyLength; i++) {
-            value = VomicPlus.rotl(value ^ ((key.charCodeAt(i) & 0xff) * 16), 9)
-        }
-
-        let hex = value.toString(16)
-        while (hex.length < 8) {
-            hex = "0" + hex
-        }
-        return hex
-    }
-
-    get baseUrl() {
-        let value = this.loadSetting("base_url")
-        if (typeof value === "string" && value.length > 0) {
-            return value.replace(/\/+$/, "")
-        }
-        return "https://vomicmh.com"
-    }
-
-    get apiUrl() {
-        let host = this.baseUrl.replace(/^https?:\/\//, "")
-        return `https://api.${host}/pics_new/pics`
-    }
+    /// Mihon 扩展的排行榜（FilterKt.rankFilter）
+    static ranks = [
+        ["-1", "不查看"], ["3", "漫评榜"], ["1", "热门榜"], ["2", "收藏榜"],
+        ["4", "更新榜"], ["7", "连载榜"], ["8", "完结榜"], ["9", "差评榜"],
+    ]
 
     get token() {
         let value = this.loadData("token")
         return typeof value === "string" ? value : ""
     }
 
-    /// 按原扩展的规则给请求签名：只对 query 参数签名，body 不参与。
-    signedHeaders(params, withAuth) {
-        let timestamp = String(Math.floor(Date.now() / 1000))
-        let keys = Object.keys(params || {}).sort()
-        let payload = []
-        for (let key of keys) {
-            let value = params[key]
-            if (value === undefined || value === null || value === "") {
-                continue
-            }
-            payload.push(`${key}=${value}`)
-        }
-        let encoded = Convert.encodeBase64(
-            Convert.encodeUtf8(`${payload.join("&")}${timestamp}${VomicPlus.salt}`)
-        )
+    /// 等价于 HeadersInterceptor + AuthorizationInterceptor
+    apiHeaders(withAuth) {
         let headers = {
-            "user-agent": "Dart/3.13 (dart:io)",
-            "platform": "android",
-            "hide-content": "0",
             "name": "pics",
-            "version": "1.2.1",
-            "t": timestamp,
-            "s": VomicPlus.signHash(encoded, timestamp),
+            "platform": "android",
+            "showsuccess": "false",
+            "showtoast": "false",
+            "version": "1.0.10",
         }
         if (withAuth) {
             let token = this.token
@@ -116,7 +63,7 @@ class VomicPlus extends ComicSource {
     }
 
     buildUrl(path, params) {
-        let url = this.apiUrl + path
+        let url = VomicPlus.apiUrl + path
         let pairs = []
         for (let key of Object.keys(params || {})) {
             let value = params[key]
@@ -133,9 +80,9 @@ class VomicPlus extends ComicSource {
 
     async getJson(path, params, withAuth) {
         params = params || {}
-        let res = await Network.get(this.buildUrl(path, params), this.signedHeaders(params, withAuth))
+        let res = await Network.get(this.buildUrl(path, params), this.apiHeaders(withAuth))
         if (res.status === 401) {
-            throw "需要登录：请在「源设置」里填写邮箱与密码"
+            throw "需要登录：请在「源设置」里填写账号与密码"
         }
         if (res.status !== 200) {
             throw `请求失败: ${res.status}`
@@ -147,14 +94,9 @@ class VomicPlus extends ComicSource {
         return json["data"]
     }
 
+    /// ComicSummary.toSManga 等价映射（tags 是空格分隔字符串，cat 是对象数组）
     parseComic(comic) {
         let tags = []
-        for (let category of comic["cat"] || []) {
-            tags.push(category["name"])
-        }
-        for (let tag of comic["tag"] || []) {
-            tags.push(tag["name"])
-        }
         if (typeof comic["tags"] === "string" && comic["tags"].length > 0) {
             for (let tag of comic["tags"].split(/\s+/)) {
                 if (tag.length > 0) {
@@ -162,7 +104,12 @@ class VomicPlus extends ComicSource {
                 }
             }
         }
-        let description = `👁️ ${comic["view_num"] || 0} - ❤️ ${comic["likes_num"] || 0}`
+        for (let category of comic["cat"] || []) {
+            if (category && category["name"]) {
+                tags.push(category["name"])
+            }
+        }
+        let description = `⭐ ${comic["score"] || "?"} - 👁️ ${comic["view_num"] || 0} - ❤️ ${comic["collect_num"] || 0}`
         if (comic["intro"] && comic["intro"].length > 0) {
             description += "\n\n" + comic["intro"]
         }
@@ -176,35 +123,27 @@ class VomicPlus extends ComicSource {
         }
     }
 
-    /// 筛选面板 → 查询参数。
+    /// 筛选面板 → getCartoonList 查询参数（对齐 FilterKt 各过滤器的 pathWord）
     filterParams(filters, options) {
         filters = filters || {}
         options = options || []
         let params = {}
-        let sort = filters["排序"] !== undefined ? filters["排序"] : options[1]
-        if (sort !== undefined && sort !== null && sort !== "") {
-            params["sort"] = sort
-        }
-        let status = filters["状态"] !== undefined ? filters["状态"] : options[2]
-        if (status) {
-            params["process"] = status
-        }
-        let creativity = filters["来源"] !== undefined ? filters["来源"] : options[3]
-        if (creativity) {
-            params["creativity"] = creativity
-        }
-        let region = filters["地区"] !== undefined ? filters["地区"] : options[4]
-        if (region) {
-            params["region"] = region
-        }
-        let displayType = filters["类型"] !== undefined ? filters["类型"] : options[5]
-        if (displayType) {
-            params["dis_type"] = displayType
-        }
+        // 分类：默认 "0"（全部）
         let category = filters["分类"] !== undefined ? filters["分类"] : options[0]
         if (category && category !== "0") {
             params["cat_id"] = category
         }
+        // 排序：默认 process_at（最新）
+        let sort = filters["排序"] !== undefined ? filters["排序"] : options[1]
+        params["sort"] = sort || "process_at"
+        // 状态：默认空（全部）
+        let status = filters["状态"] !== undefined ? filters["状态"] : options[2]
+        if (status) {
+            params["process"] = status
+        }
+        // 来源：默认 "全部"
+        let creativity = filters["来源"] !== undefined ? filters["来源"] : options[3]
+        params["creativity"] = creativity || "全部"
         return params
     }
 
@@ -225,8 +164,8 @@ class VomicPlus extends ComicSource {
                 {
                     label: "排序",
                     type: "select",
-                    options: ["-默认", "hot_value-最热", "process_at-最新"],
-                    default: "",
+                    options: ["process_at-最新", "hot_value-最热"],
+                    default: "process_at",
                 },
                 {
                     label: "状态",
@@ -237,23 +176,8 @@ class VomicPlus extends ComicSource {
                 {
                     label: "来源",
                     type: "select",
-                    options: ["-全部", "原创-原创", "汉化-汉化", "转载-转载"],
-                    default: "",
-                },
-                {
-                    label: "地区",
-                    type: "select",
-                    options: [
-                        "-全部", "大陆-大陆", "日本-日本", "韩国-韩国",
-                        "港台-港台", "欧美-欧美", "其他-其他",
-                    ],
-                    default: "",
-                },
-                {
-                    label: "类型",
-                    type: "select",
-                    options: ["-全部", "条漫-条漫", "页漫-页漫", "其他-其他"],
-                    default: "",
+                    options: ["全部-全部", "原创-原创", "汉化-汉化", "转载-转载"],
+                    default: "全部",
                 },
             ],
             load: async (page, options, filters) => {
@@ -303,8 +227,8 @@ class VomicPlus extends ComicSource {
             {
                 label: "排序",
                 type: "select",
-                options: ["-默认", "hot_value-最热", "process_at-最新"],
-                default: "",
+                options: ["process_at-最新", "hot_value-最热"],
+                default: "process_at",
             },
             {
                 label: "状态",
@@ -337,10 +261,16 @@ class VomicPlus extends ComicSource {
             let data = await this.getJson("/c/getCartoonInfoV1", { car_id: String(id) }, false)
             let tags = []
             for (let category of data["cat"] || []) {
-                tags.push(category["name"])
+                if (category && category["name"]) {
+                    tags.push(category["name"])
+                }
             }
-            for (let tag of data["tag"] || []) {
-                tags.push(tag["name"])
+            if (typeof data["tags"] === "string" && data["tags"].length > 0) {
+                for (let tag of data["tags"].split(/\s+/)) {
+                    if (tag.length > 0) {
+                        tags.push(tag)
+                    }
+                }
             }
             let statusText = data["process"] || ""
             let description = data["intro"] || ""
@@ -355,22 +285,21 @@ class VomicPlus extends ComicSource {
             if (data["dis_type"]) {
                 details["类型"] = [data["dis_type"]]
             }
+            if (data["score"]) {
+                details["评分"] = [String(data["score"])]
+            }
             if (tags.length > 0) {
                 details["标签"] = tags
             }
+            // ComicDetailResult.toSChapterList：chapter_list[].values[]，
+            // 章节名带 group_name（正篇等）前缀，url 为 chapter/{car_id}/{id}
             let chapters = new Map()
             let groups = data["chapter_list"] || []
-            let chapterCount = 0
             for (let group of groups) {
-                for (let chapter of group["values"] || []) {
-                    chapterCount++
-                }
-            }
-            for (let group of groups) {
-                let groupName = group["name"] || ""
                 for (let chapter of group["values"] || []) {
                     let name = String(chapter["name"] || "")
-                    if (chapterCount > 0 && groups.length > 1 && groupName.length > 0) {
+                    let groupName = chapter["group_name"] || ""
+                    if (groupName.length > 0 && groupName !== "正篇") {
                         name = `${groupName}-${name}`
                     }
                     chapters.set(String(chapter["id"]), name)
@@ -385,10 +314,12 @@ class VomicPlus extends ComicSource {
             }
         },
 
+        // ContentResult.toPageList：c_id + clarity=gq；img_list[].url。
+        // 需要 Bearer token（服务器对未登录返回 401）。
         loadEp: async (comicId, epId) => {
             let data = await this.getJson(
                 "/c/getChapterInfo",
-                { c_id: String(epId) },
+                { c_id: String(epId), clarity: "gq" },
                 true
             )
             let images = []
@@ -402,17 +333,32 @@ class VomicPlus extends ComicSource {
             }
             return { images: images }
         },
+
+        /// 图片 CDN（cdm.vomicer.com）要求 Dart UA，等价于 Mihon 扩展的
+        /// HeadersInterceptor。Venera 通过 onImageLoad 返回的 headers 生效。
+        onImageLoad: (imageKey, comicId, epId) => {
+            return {
+                url: imageKey,
+                headers: { "user-agent": "Dart/3.7 (dart:io)" },
+            }
+        },
+
+        /// 封面同样托管在 cdm.vomicer.com。
+        onThumbnailLoad: (imageKey, comicId) => {
+            return {
+                url: imageKey,
+                headers: { "user-agent": "Dart/3.7 (dart:io)" },
+            }
+        },
     }
 
     account = {
+        // TokenProvider.V1.getToken：FormBody identity/password，无签名、无 JSON body
         login: async (account, pwd) => {
-            let headers = this.signedHeaders({}, false)
-            headers["content-type"] = "application/json;charset=UTF-8"
-            let res = await Network.post(
-                this.apiUrl + "/login",
-                headers,
-                JSON.stringify({ identity: account, password: pwd })
-            )
+            let headers = this.apiHeaders(false)
+            headers["content-type"] = "application/x-www-form-urlencoded"
+            let body = `identity=${encodeURIComponent(account)}&password=${encodeURIComponent(pwd)}`
+            let res = await Network.post(VomicPlus.apiUrl + "/login", headers, body)
             if (res.status !== 200) {
                 throw `登录失败: ${res.status}`
             }
@@ -428,14 +374,5 @@ class VomicPlus extends ComicSource {
             this.deleteData("token")
         },
         registerWebsite: "https://vomicmh.com",
-    }
-
-    settings = {
-        base_url: {
-            title: "线路",
-            type: "input",
-            validator: "^https?://.+$",
-            default: "https://vomicmh.com",
-        },
     }
 }
