@@ -2,6 +2,7 @@
   {
     "name": "拷贝漫画",
     "fileName": "copy_manga.js",
+    "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/copy_manga.js",
     "key": "copy_manga",
     "version": "1.5.0",
     "description": "自动从可用 API 域名池中挑选最快域名；发现页支持题材 / 排序 / 类型筛选"
@@ -9,6 +10,7 @@
   {
     "name": "禁漫天堂",
     "fileName": "jm.js",
+    "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/jm.js",
     "key": "jm",
     "version": "1.4.1",
     "description": "自动从官方加密域名表获取最新线路；失败线路冷却 5 分钟后再试"
@@ -16,6 +18,7 @@
   {
     "name": "热辣漫画",
     "fileName": "hot_manga.js",
+    "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/hot_manga.js",
     "key": "hot_manga",
     "version": "1.1.0",
     "description": "自动从可用 API 域名池中挑选最快域名；发现页支持主题 / 排序 / 榜单"
@@ -23,6 +26,7 @@
   {
     "name": "紳士漫畫",
     "fileName": "wnacg.js",
+    "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/wnacg.js",
     "key": "wnacg",
     "version": "1.1.0",
     "description": "需要 HTTP/3 才能访问（客户端已内置回退）；发现页支持排序 / 分类"
@@ -30,6 +34,7 @@
   {
     "name": "再漫画",
     "fileName": "zaimanhua.js",
+    "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/zaimanhua.js",
     "key": "zaimanhua",
     "version": "1.0.2",
     "description": "发现页支持排序 / 题材 / 状态 / 地区筛选"
@@ -37,6 +42,7 @@
   {
     "name": "Zero搬运网",
     "fileName": "zerobyw33.js",
+    "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/zerobyw33.js",
     "key": "zerobyw33",
     "version": "1.2.1",
     "description": "图片走主站 SNI + Host 头；请求失败自动重试并切换线路"
@@ -44,6 +50,7 @@
   {
     "name": "Komiic",
     "fileName": "komiic.js",
+    "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/komiic.js",
     "key": "komiic",
     "version": "1.0.0",
     "description": "GraphQL 接口；封面跟随线路改写；发现页与分类页支持排序 / 类型筛选"
@@ -51,13 +58,15 @@
   {
     "name": "vomic漫+",
     "fileName": "vomicmh.js",
+    "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/vomicmh.js",
     "key": "vomicmh",
-    "version": "1.0.0",
-    "description": "移植 Mihon 的 zh.vomic；签名算法一致；章节内容需要登录后读取"
+    "version": "1.1.0",
+    "description": "移植 Mihon 的 zh.vomicmh v1.4.4（Apache-2.0）；直连国内 API http://43.143.245.32/pics，无签名；章节内容需要登录后读取"
   },
   {
     "name": "哔咔漫画",
     "fileName": "picacomic.js",
+    "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/picacomic.js",
     "key": "picacomic",
     "version": "1.0.0",
     "description": "走 go2778 线路，需要登录；发现页支持排序 / 类型 / 榜单 / 只看收藏"
