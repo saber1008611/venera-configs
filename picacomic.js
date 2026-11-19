@@ -16,7 +16,7 @@ class Picacomic extends ComicSource {
 
     key = "picacomic"
 
-    version = "1.0.0"
+    version = "1.0.1"
 
     minAppVersion = "1.6.0"
 
@@ -189,13 +189,18 @@ class Picacomic extends ComicSource {
             return ""
         }
         let host = String(fileServer)
-        if (Picacomic.apiHost.indexOf("go2778") >= 0) {
-            host = host.replace("picacomic", "go2778")
+        // storage-b.picacomic.com is DNS-poisoned in mainland China (resolves to
+        // a black-holed address), while go2778 mirrors the same buckets. Swap the
+        // host unconditionally instead of only when the API host is the mirror.
+        host = host.replace("picacomic.com", "go2778.com")
+        let rest = String(path)
+        if (rest.indexOf("http") === 0) {
+            return rest.replace("picacomic.com", "go2778.com")
         }
-        if (host.indexOf("static") >= 0) {
-            return `${host}/${path}`
+        if (rest.indexOf("static") === 0) {
+            return `${host}/${rest}`
         }
-        return `${host}/static/${path}`
+        return `${host}/static/${rest}`
     }
 
     /// 列表项 / 详情项统一转成 App 的 Comic
@@ -376,7 +381,7 @@ class Picacomic extends ComicSource {
             let thumb = comic["thumb"] || {}
             let cover = ""
             if (thumb["fileServer"] && thumb["path"]) {
-                cover = `${thumb["fileServer"]}/static/${thumb["path"]}`
+                cover = Picacomic.imageUrl(thumb["fileServer"], thumb["path"])
             }
 
             // 章节列表（可能多页）

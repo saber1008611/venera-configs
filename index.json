@@ -68,7 +68,7 @@
     "fileName": "picacomic.js",
     "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/picacomic.js",
     "key": "picacomic",
-    "version": "1.0.0",
-    "description": "走 go2778 线路，需要登录；发现页支持排序 / 类型 / 榜单 / 只看收藏"
+    "version": "1.0.1",
+    "description": "走 go2778 线路，需要登录；封面和章节图统一走 go2778 镜像，避免 storage-b.picacomic.com 污染导致详情页封面消失；发现页支持排序 / 类型 / 榜单 / 只看收藏"
   }
 ]
