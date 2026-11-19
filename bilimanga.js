@@ -72,7 +72,7 @@ const IMG_PROXY_TEMPLATE = "";
 class BiliManga extends ComicSource {
   name = "嗶哩漫畫";
   key = "bilimanga";
-  version = "1.1.7";
+  version = "1.1.9";
   minAppVersion = "1.6.0";
 
   url = "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/bilimanga.js";
@@ -211,6 +211,28 @@ class BiliManga extends ComicSource {
     let res = await Network.get(url, this.pageHeaders());
     if (res.status !== 200) throw label + " 请求失败: " + res.status;
     return res.body;
+  }
+
+  async fetchEpBody(comicId, epId) {
+    let url = this.baseUrl + "/read/" + comicId + "/" + epId + ".html";
+    let headers = this.pageHeaders();
+    headers["X-Requested-With"] = "XMLHttpRequest";
+    headers["Sec-Fetch-Site"] = "same-origin";
+    let probes = [url, url + "?mobile=1", url + "?ajax=1"];
+    let last = "";
+    for (let target of probes) {
+      let res = await Network.get(target, headers);
+      if (res.status !== 200) continue;
+      let body = String(res.body || "");
+      if (body.indexOf("motiezw.com") >= 0 || body.indexOf(".avif") >= 0) {
+        return body;
+      }
+      last = body;
+    }
+    if (last.indexOf("不支持桌面") >= 0) {
+      throw "站点当前返回桌面端占位页，阅读页图片接口不可用";
+    }
+    return last;
   }
 
   // 解析 .book-li 漫画卡片
@@ -723,10 +745,7 @@ class BiliManga extends ComicSource {
     },
 
     loadEp: async (comicId, epId) => {
-      let body = await this.fetchBody(
-        "ep",
-        this.baseUrl + "/read/" + comicId + "/" + epId + ".html"
-      );
+      let body = await this.fetchEpBody(comicId, epId);
       let doc = new HtmlDocument(body);
       let images = [];
       let content = doc.querySelector("#acontentz") || doc;
