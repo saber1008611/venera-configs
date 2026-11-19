@@ -70,21 +70,5 @@
     "key": "picacomic",
     "version": "1.0.1",
     "description": "走 go2778 线路，需要登录；封面和章节图统一走 go2778 镜像，避免 storage-b.picacomic.com 污染导致详情页封面消失；发现页支持排序 / 类型 / 榜单 / 只看收藏"
-  },
-  {
-    "name": "MangaDex",
-    "fileName": "manga_dex.js",
-    "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/manga_dex.js",
-    "key": "manga_dex",
-    "version": "1.1.2",
-    "description": "移植 venera-app/venera-configs 官方 MangaDex 源（经 handahao666-boop 收录）；API 请求使用非浏览器 UA 绕过 MangaDex POWBlock 浏览器验证；探索页包含热门 / 最新 / 最近更新，支持排序、内容分级、连载状态筛选；章节默认英文；源设置可切换原图 / 压缩图"
-  },
-  {
-    "name": "嗶哩漫畫",
-    "fileName": "bilimanga.js",
-    "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/bilimanga.js",
-    "key": "bilimanga",
-    "version": "1.1.9",
-    "description": "移植 handahao666-boop/venera_comic_source 的嗶哩漫畫源；支持发现页分类、搜索、详情与章节阅读；章节图片请求增加移动端探测与明确错误提示；章节图仅 AVIF，部分 Android 机型可能无法解码；图片失败会轮换移动端请求头重试并校验图片字节"
   }
 ]
