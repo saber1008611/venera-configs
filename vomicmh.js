@@ -13,7 +13,7 @@
 class VomicPlus extends ComicSource {
     name = "vomic漫+"
     key = "vomicmh"
-    version = "1.1.1"
+    version = "1.1.2"
     minAppVersion = "1.6.0"
     url = "https://vomicmh.com"
 
@@ -293,17 +293,36 @@ class VomicPlus extends ComicSource {
             }
             // ComicDetailResult.toSChapterList：chapter_list[].values[]，
             // 章节名带 group_name（正篇等）前缀，url 为 chapter/{car_id}/{id}
+            //
+            // 接口按 sort 倒序返回（12, 11, 10 ... 1），未排序直接插入 Map 会
+            // 让目录整个反过来；这里按 sort 升序排好再插入。sort 缺失时退回
+            // 到原数组倒序（接口固定倒序，倒过来即正序）。
             let chapters = new Map()
             let groups = data["chapter_list"] || []
+            let entries = []
             for (let group of groups) {
-                for (let chapter of group["values"] || []) {
-                    let name = String(chapter["name"] || "")
-                    let groupName = chapter["group_name"] || ""
-                    if (groupName.length > 0 && groupName !== "正篇") {
-                        name = `${groupName}-${name}`
-                    }
-                    chapters.set(String(chapter["id"]), name)
+                let values = group["values"] || []
+                let ordered = []
+                let allHaveSort = values.length > 0 &&
+                    values.every((c) => c["sort"] !== undefined && c["sort"] !== null)
+                if (allHaveSort) {
+                    ordered = values.slice().sort(
+                        (a, b) => parseFloat(a["sort"]) - parseFloat(b["sort"])
+                    )
+                } else {
+                    ordered = values.slice().reverse()
                 }
+                for (let chapter of ordered) {
+                    entries.push(chapter)
+                }
+            }
+            for (let chapter of entries) {
+                let name = String(chapter["name"] || "")
+                let groupName = chapter["group_name"] || ""
+                if (groupName.length > 0 && groupName !== "正篇") {
+                    name = `${groupName}-${name}`
+                }
+                chapters.set(String(chapter["id"]), name)
             }
             return {
                 title: data["name"],

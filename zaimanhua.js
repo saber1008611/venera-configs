@@ -2,7 +2,7 @@ class Zaimanhua extends ComicSource {
   // 基础信息
   name = "再漫画";
   key = "zaimanhua";
-  version = "1.0.2";
+  version = "1.0.3";
   minAppVersion = "1.0.0";
   url =
     "https://cdn.jsdelivr.net/gh/venera-app/venera-configs@main/zaimanhua.js";
@@ -398,15 +398,37 @@ class Zaimanhua extends ComicSource {
       function processChapters(groups) {
         return (groups || []).reduce((result, group) => {
           const groupTitle = group.title || "默认";
-          const chapters = (group.data || [])
-            .reverse()
-            .map((ch) => [
-              String(ch.chapter_id),
-              `${ch.chapter_title.replace(
-                /^(?:连载版?)?(\d+\.?\d*)([话卷])?$/,
-                (_, n, t) => `第${n}${t || "话"}`
-              )}`,
-            ]);
+          // 接口按 chapter_order 倒序返回，但个别作品的顺序并不规整
+          // （例如"人物设定"排在最后、最新话排在最前），直接 reverse 会把
+          // 目录弄乱。改为按 chapter_order 升序；order 相同时再按章号，
+          // 最后才回退到接口原序。
+          const raw = group.data || [];
+          const chapterNumber = (title) => {
+            const match = String(title || "").match(/(\d+(?:\.\d+)?)/);
+            return match ? parseFloat(match[1]) : null;
+          };
+          const ordered = raw
+            .map((ch, index) => ({ ch, index }))
+            .sort((a, b) => {
+              const oa = Number(a.ch.chapter_order);
+              const ob = Number(b.ch.chapter_order);
+              const aOk = Number.isFinite(oa);
+              const bOk = Number.isFinite(ob);
+              if (aOk && bOk && oa !== ob) return oa - ob;
+              if (aOk !== bOk) return aOk ? -1 : 1;
+              const na = chapterNumber(a.ch.chapter_title);
+              const nb = chapterNumber(b.ch.chapter_title);
+              if (na !== null && nb !== null && na !== nb) return na - nb;
+              return a.index - b.index;
+            })
+            .map((item) => item.ch);
+          const chapters = ordered.map((ch) => [
+            String(ch.chapter_id),
+            `${ch.chapter_title.replace(
+              /^(?:连载版?)?(\d+\.?\d*)([话卷])?$/,
+              (_, n, t) => `第${n}${t || "话"}`
+            )}`,
+          ]);
           result.set(groupTitle, new Map(chapters));
           return result;
         }, new Map());
