@@ -8,6 +8,14 @@
     "description": "拷贝会对破解版 APP 把详情/章节/看图整组封成 210，此时自动切到同库的热辣漫画 API，列表搜索收藏仍走拷贝；另有域名池自动切换"
   },
   {
+    "name": "MangaDex",
+    "fileName": "manga_dex.js",
+    "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/manga_dex.js",
+    "key": "manga_dex",
+    "version": "1.2.0",
+    "description": "章节按所选语言筛选，列表只显示有该语言可读章节的作品，不列官方外链章节；探索 / 分类 / 搜索支持排序、受众、原文语言、连载状态、内容分级、年份、标签筛选；图片与接口使用非浏览器 UA（MangaDex 对浏览器 UA 返回 403）"
+  },
+  {
     "name": "禁漫天堂",
     "fileName": "jm.js",
     "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/jm.js",
