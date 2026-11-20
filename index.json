@@ -36,7 +36,7 @@
     "fileName": "wnacg.js",
     "url": "https://gh-proxy.com/https://raw.githubusercontent.com/saber1008611/venera-configs/main/wnacg.js",
     "key": "wnacg",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "description": "需要 HTTP/3 才能访问（客户端已内置回退）；发现页支持排序 / 分类"
   },
   {

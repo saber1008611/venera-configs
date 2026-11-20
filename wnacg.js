@@ -10,7 +10,7 @@
 class WNACG extends ComicSource {
     name = "紳士漫畫"
     key = "wnacg"
-    version = "1.1.0"
+    version = "1.1.1"
     minAppVersion = "1.6.0"
     url = "https://www.wnacg.site"
 
@@ -278,7 +278,11 @@ class WNACG extends ComicSource {
             let description = ""
             let tags = []
             let status = 0
-            let chapters = {}
+            // 用无原型的对象当字典：章节 id 若恰好是 `constructor`、
+            // `toString` 这类原型属性名，普通对象会因原型链上有值而被
+            // 误判成"已存在"，导致第 2 页起漏掉该章。
+            let chapters = Object.create(null)
+            let seen = Object.create(null)
             try {
                 let h2 = doc.querySelector("h2")
                 if (h2) title = String(h2.text || "").trim() || id
@@ -322,7 +326,8 @@ class WNACG extends ComicSource {
                 let chapterEls = doc.querySelectorAll("div.sr_compact a.tagshow")
                 for (let i = 0; i < chapterEls.length; i++) {
                     let chid = String(chapterEls[i].attributes["data-chid"] || "").trim()
-                    if (!chid) continue
+                    if (!chid || seen[chid]) continue
+                    seen[chid] = true
                     chapters[chid] = String(chapterEls[i].text || "").trim() || chid
                 }
 
@@ -352,7 +357,8 @@ class WNACG extends ComicSource {
                             let els = pageDoc.querySelectorAll("div.sr_compact a.tagshow")
                             for (let i = 0; i < els.length; i++) {
                                 let chid = String(els[i].attributes["data-chid"] || "").trim()
-                                if (!chid || chapters[chid]) continue
+                                if (!chid || seen[chid]) continue
+                                seen[chid] = true
                                 chapters[chid] = String(els[i].text || "").trim() || chid
                             }
                         } finally {
@@ -369,7 +375,7 @@ class WNACG extends ComicSource {
                 chapters[id] = "全一话"
             }
             // 站点按新→旧排列，阅读顺序需要反过来
-            let reversed = {}
+            let reversed = Object.create(null)
             let keys = Object.keys(chapters)
             for (let i = keys.length - 1; i >= 0; i--) {
                 reversed[keys[i]] = chapters[keys[i]]
